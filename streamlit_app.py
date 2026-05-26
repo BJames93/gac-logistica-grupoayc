@@ -54,24 +54,35 @@ with tab1:
             f_dom = st.file_uploader("Domicilio")
             f_ban = st.file_uploader("Banco")
             f_tox = st.file_uploader("Toxicológico")
+            f_est = st.file_uploader("Comprobante de Estudios") # <-- Nuevo campo
             
         enviar = st.form_submit_button("Guardar Conductor")
         if enviar:
-            datos = {
-                "nombre_driver": nombre, "rfc": rfc.upper(), "correo": correo, "celular": celular,
-                "url_fotografia": procesar_archivo(f_foto, "conductores/fotos", rfc),
-                "url_acta_nacimiento": procesar_archivo(f_acta, "conductores/actas", rfc),
-                "url_curp": procesar_archivo(f_curp, "conductores/curps", rfc),
-                "url_seguro_social": procesar_archivo(f_nss, "conductores/nss", rfc),
-                "url_ine": procesar_archivo(f_ine, "conductores/ines", rfc),
-                "url_constancia_fiscal": procesar_archivo(f_fis, "conductores/fiscal", rfc),
-                "url_licencia": procesar_archivo(f_lic, "conductores/licencias", rfc),
-                "url_comprobante_domicilio": procesar_archivo(f_dom, "conductores/domicilios", rfc),
-                "url_caratula_bancaria": procesar_archivo(f_ban, "conductores/bancos", rfc),
-                "url_toxicologico": procesar_archivo(f_tox, "conductores/toxicologicos", rfc)
-            }
-            supabase.table("alta_conductor").insert(datos).execute()
-            st.success("Conductor registrado")
+            if not nombre or not rfc:
+                st.error("Por favor completa los campos obligatorios (Nombre y RFC)")
+            else:
+                datos = {
+                    "nombre_driver": nombre, 
+                    "rfc": rfc.upper(), 
+                    "correo": correo, 
+                    "celular": celular,
+                    "url_fotografia": procesar_archivo(f_foto, "conductores/fotos", rfc),
+                    "url_acta_nacimiento": procesar_archivo(f_acta, "conductores/actas", rfc),
+                    "url_curp": procesar_archivo(f_curp, "conductores/curps", rfc),
+                    "url_seguro_social": procesar_archivo(f_nss, "conductores/nss", rfc),
+                    "url_ine": procesar_archivo(f_ine, "conductores/ines", rfc),
+                    "url_constancia_fiscal": procesar_archivo(f_fis, "conductores/fiscal", rfc),
+                    "url_licencia": procesar_archivo(f_lic, "conductores/licencias", rfc),
+                    "url_comprobante_domicilio": procesar_archivo(f_dom, "conductores/domicilios", rfc),
+                    "url_caratula_bancaria": procesar_archivo(f_ban, "conductores/bancos", rfc),
+                    "url_toxicologico": procesar_archivo(f_tox, "conductores/toxicologicos", rfc),
+                    "url_comprobante_estudios": procesar_archivo(f_est, "conductores/estudios", rfc) # <-- Nueva ruta
+                }
+                try:
+                    supabase.table("alta_conductor").insert(datos).execute()
+                    st.success("Conductor registrado exitosamente")
+                except Exception as e:
+                    st.error(f"Error al guardar: {e}")
 
 # ==========================================
 # PESTAÑA 2: UNIDADES
@@ -189,7 +200,7 @@ with tab4:
                     
                     with c2:
                         st.write("### Documentación Digital")
-                        # Mapeo completo de todos los campos
+                        # Mapeo completo incluyendo Comprobante de Estudios
                         docs = {
                             "Acta de Nacimiento": "url_acta_nacimiento",
                             "CURP": "url_curp",
@@ -199,7 +210,8 @@ with tab4:
                             "Licencia de Conducir": "url_licencia",
                             "Comprobante Domicilio": "url_comprobante_domicilio",
                             "Carátula Bancaria": "url_caratula_bancaria",
-                            "Examen Toxicológico": "url_toxicologico"
+                            "Examen Toxicológico": "url_toxicologico",
+                            "Comprobante de Estudios": "url_comprobante_estudios" # <-- Campo agregado
                         }
                         # Generación dinámica de botones
                         for nombre, key in docs.items():
