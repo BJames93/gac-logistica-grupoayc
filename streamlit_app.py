@@ -251,50 +251,61 @@ with tab5:
     st.header("🔄 Actualización de Expedientes")
     st.info("Utiliza esta sección para subir documentos faltantes o renovaciones.")
     
-    # 1. Buscador por RFC
     rfc_busqueda = st.text_input("Ingresa el RFC del conductor para actualizar:")
     
     if rfc_busqueda:
-        # Buscamos al conductor
         res = supabase.table("alta_conductor").select("*").eq("rfc", rfc_busqueda.upper()).execute()
         
         if res.data:
             reg = res.data[0]
             st.write(f"Conductor encontrado: **{reg['nombre_driver']}**")
             
-            # 2. Selector de documento a actualizar
-            opcion = st.selectbox("¿Qué documento deseas actualizar?", 
-                                 ["", "Toxicológico", "Licencia", "Comprobante de Estudios", "Carta de Referencia"])
+            # Definimos el catálogo completo
+            docs_map = {
+                "Acta de Nacimiento": "url_acta_nacimiento",
+                "CURP": "url_curp",
+                "Seguro Social (NSS)": "url_seguro_social",
+                "INE": "url_ine",
+                "Constancia Fiscal": "url_constancia_fiscal",
+                "Licencia de Conducir": "url_licencia",
+                "Comprobante Domicilio": "url_comprobante_domicilio",
+                "Carátula Bancaria": "url_caratula_bancaria",
+                "Examen Toxicológico": "url_toxicologico",
+                "Comprobante de Estudios": "url_comprobante_estudios",
+                "Carta de Referencia": "url_carta_referencia"
+            }
+            
+            # --- AYUDA VISUAL PARA EL USUARIO ---
+            st.write("---")
+            st.write("Estado de documentos actuales:")
+            cols = st.columns(3)
+            for i, (nombre, key) in enumerate(docs_map.items()):
+                status = "✅" if reg.get(key) else "❌"
+                cols[i % 3].write(f"{status} {nombre}")
+            st.write("---")
+            
+            # Selector de documento a actualizar
+            opcion = st.selectbox("¿Qué documento deseas actualizar?", [""] + list(docs_map.keys()))
             
             if opcion:
                 archivo_nuevo = st.file_uploader(f"Cargar nuevo archivo de {opcion}")
                 
                 if st.button("Guardar actualización"):
                     if archivo_nuevo:
-                        # Mapeo de nombres para rutas de almacenamiento
-                        carpetas = {
-                            "Toxicológico": "conductores/toxicologicos",
-                            "Licencia": "conductores/licencias",
-                            "Comprobante de Estudios": "conductores/estudios",
-                            "Carta de Referencia": "conductores/referencias"
-                        }
+                        # Obtenemos la columna y la ruta dinámicamente
+                        columna_db = docs_map[opcion]
+                        # Generamos una ruta lógica basada en el nombre
+                        nombre_carpeta = opcion.lower().replace(" ", "_")
+                        ruta_storage = f"conductores/{nombre_carpeta}s"
                         
-                        columna_db = {
-                            "Toxicológico": "url_toxicologico",
-                            "Licencia": "url_licencia",
-                            "Comprobante de Estudios": "url_comprobante_estudios",
-                            "Carta de Referencia": "url_carta_referencia"
-                        }
+                        # Subir archivo usando la función procesar_archivo (asegúrate de que tenga el upsert=True)
+                        nueva_url = procesar_archivo(archivo_nuevo, ruta_storage, rfc_busqueda.upper())
                         
-                        # Subir archivo
-                        nueva_url = procesar_archivo(archivo_nuevo, carpetas[opcion], rfc_busqueda.upper())
+                        # Actualizar en Supabase
+                        supabase.table("alta_conductor").update({columna_db: nueva_url}).eq("rfc", rfc_busqueda.upper()).execute()
                         
-                        # Actualizar solo esa columna en Supabase
-                        supabase.table("alta_conductor").update({columna_db[opcion]: nueva_url}).eq("rfc", rfc_busqueda.upper()).execute()
-                        
-                        st.success(f"¡{opcion} actualizado correctamente!")
+                        st.success(f"¡{opcion} actualizado correctamente! Recarga la página para ver el cambio en el estado.")
                     else:
                         st.warning("Por favor selecciona un archivo.")
         else:
             st.error("No se encontró ningún conductor con ese RFC.")
-
