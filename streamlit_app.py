@@ -160,11 +160,11 @@ with tab3:
     st.header("Captura Dinámica de Despacho Operativo")
     st.write("Módulo relacional. Permite enlazar los conductores y unidades activos en sistema.")
     
-    # 1. Definimos variables vacías por defecto
+    # 1. Definimos variables vacías por defecto para prevenir NameError
     dict_conductores = {}
     dict_unidades = {}
     
-    # 2. Intentamos cargar datos
+    # 2. Intentamos cargar datos desde la base de datos
     try:
         conductores_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
         unidades_db = supabase.table("unidades").select("id_unidad, placas").execute().data
@@ -182,8 +182,9 @@ with tab3:
         with st.form("form_operacion", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                sel_conductor = st.selectbox("Seleccione el Conductor asignado *", options=list(dict_conductores.keys()))
-                sel_unidad = st.selectbox("Seleccione las Placas del Vehículo *", options=list(dict_unidades.keys()))
+                # Opciones con espacio en blanco al inicio [""]
+                sel_conductor = st.selectbox("Seleccione el Conductor asignado *", options=[""] + list(dict_conductores.keys()))
+                sel_unidad = st.selectbox("Seleccione las Placas del Vehículo *", options=[""] + list(dict_unidades.keys()))
                 status_operacion = st.selectbox("Estatus del Servicio", options=["En ruta", "Cancelacion", "No show"])
             
             with col2:
@@ -206,22 +207,30 @@ with tab3:
             with c_btn2:
                 enviar_operacion = st.form_submit_button("Cerrar y Despachar Operación")
             
+            # --- FEEDBACK VISUAL DEL BOTÓN LIMPIAR ---
+            if limpiar:
+                st.info("🧹 Formulario reiniciado a sus valores por defecto.")
+            
+            # --- LÓGICA DE ENVÍO CON VALIDACIÓN ---
             if enviar_operacion:
-                iso_llegada = datetime.combine(fecha_llegada, hora_llegada).isoformat()
-                iso_salida = datetime.combine(fecha_salida, hora_salida).isoformat()
-                
-                datos_operacion = {
-                    "conductor_id": dict_conductores[sel_conductor],
-                    "unidad_id": dict_unidades[sel_unidad],
-                    "status_operacion": status_operacion,
-                    "hora_llegada_hub": iso_llegada,
-                    "hora_salida_hub": iso_salida,
-                    "paquetes_cargados": int(paquetes),
-                    "paradas": int(paradas)
-                }
-                
-                supabase.table("registro_operacion").insert(datos_operacion).execute()
-                st.success("¡Viaje despachado correctamente!")
+                if not sel_conductor or not sel_unidad:
+                    st.error("No se puede generar un registro sin asociar conductor y vehículo válidos.")
+                else:
+                    iso_llegada = datetime.combine(fecha_llegada, hora_llegada).isoformat()
+                    iso_salida = datetime.combine(fecha_salida, hora_salida).isoformat()
+                    
+                    datos_operacion = {
+                        "conductor_id": dict_conductores[sel_conductor],
+                        "unidad_id": dict_unidades[sel_unidad],
+                        "status_operacion": status_operacion,
+                        "hora_llegada_hub": iso_llegada,
+                        "hora_salida_hub": iso_salida,
+                        "paquetes_cargados": int(paquetes),
+                        "paradas": int(paradas)
+                    }
+                    
+                    supabase.table("registro_operacion").insert(datos_operacion).execute()
+                    st.success("¡Viaje despachado correctamente!")
 # ==========================================
 # NUEVA PESTAÑA 4: CONSULTA DE EXPEDIENTES
 # ==========================================
