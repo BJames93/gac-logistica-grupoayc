@@ -54,7 +54,8 @@ with tab1:
             f_dom = st.file_uploader("Domicilio")
             f_ban = st.file_uploader("Banco")
             f_tox = st.file_uploader("Toxicológico")
-            f_est = st.file_uploader("Comprobante de Estudios") # <-- Nuevo campo
+            f_est = st.file_uploader("Comprobante de Estudios")
+            f_ref = st.file_uploader("Carta de Referencia") # <-- Nuevo campo
             
         enviar = st.form_submit_button("Guardar Conductor")
         if enviar:
@@ -76,7 +77,8 @@ with tab1:
                     "url_comprobante_domicilio": procesar_archivo(f_dom, "conductores/domicilios", rfc),
                     "url_caratula_bancaria": procesar_archivo(f_ban, "conductores/bancos", rfc),
                     "url_toxicologico": procesar_archivo(f_tox, "conductores/toxicologicos", rfc),
-                    "url_comprobante_estudios": procesar_archivo(f_est, "conductores/estudios", rfc) # <-- Nueva ruta
+                    "url_comprobante_estudios": procesar_archivo(f_est, "conductores/estudios", rfc),
+                    "url_carta_referencia": procesar_archivo(f_ref, "conductores/referencias", rfc) # <-- Nueva ruta
                 }
                 try:
                     supabase.table("alta_conductor").insert(datos).execute()
@@ -200,7 +202,7 @@ with tab4:
                     
                     with c2:
                         st.write("### Documentación Digital")
-                        # Mapeo completo incluyendo Comprobante de Estudios
+                        # Mapeo actualizado con Carta de Referencia
                         docs = {
                             "Acta de Nacimiento": "url_acta_nacimiento",
                             "CURP": "url_curp",
@@ -211,7 +213,8 @@ with tab4:
                             "Comprobante Domicilio": "url_comprobante_domicilio",
                             "Carátula Bancaria": "url_caratula_bancaria",
                             "Examen Toxicológico": "url_toxicologico",
-                            "Comprobante de Estudios": "url_comprobante_estudios" # <-- Campo agregado
+                            "Comprobante de Estudios": "url_comprobante_estudios",
+                            "Carta de Referencia": "url_carta_referencia" # <-- Campo agregado
                         }
                         # Generación dinámica de botones
                         for nombre, key in docs.items():
