@@ -25,7 +25,7 @@ def procesar_archivo(archivo, carpeta, identificador):
 # --- INTERFAZ ---
 st.set_page_config(layout="wide")
 st.title("📊 Sistema Centralizado Grupo AyC")
-tab1, tab2, tab3, tab4 = st.tabs(["🚗 Alta de Conductores", "🚛 Control de Unidades", "📋 Registro de Operación","🔍 Consulta Integral"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🚗 Alta de Conductores", "🚛 Control de Unidades", "📋 Registro de Operación","🔍 Consulta Integral","🔄 Actualización"])
 
 # ==========================================
 # PESTAÑA 1: ALTA DE CONDUCTOR
@@ -257,3 +257,58 @@ with tab4:
                         st.caption("Póliza de Seguro: No cargado")
         except Exception as e:
             st.error(f"Error cargando unidades: {e}")
+
+# ===============================================
+# NUEVA PESTAÑA 5: ACTUALIZACION DE EXPEDIENTES
+# ===============================================
+with tab5:
+    st.header("🔄 Actualización de Expedientes")
+    st.info("Utiliza esta sección para subir documentos faltantes o renovaciones.")
+    
+    # 1. Buscador por RFC
+    rfc_busqueda = st.text_input("Ingresa el RFC del conductor para actualizar:")
+    
+    if rfc_busqueda:
+        # Buscamos al conductor
+        res = supabase.table("alta_conductor").select("*").eq("rfc", rfc_busqueda.upper()).execute()
+        
+        if res.data:
+            reg = res.data[0]
+            st.write(f"Conductor encontrado: **{reg['nombre_driver']}**")
+            
+            # 2. Selector de documento a actualizar
+            opcion = st.selectbox("¿Qué documento deseas actualizar?", 
+                                 ["", "Toxicológico", "Licencia", "Comprobante de Estudios", "Carta de Referencia"])
+            
+            if opcion:
+                archivo_nuevo = st.file_uploader(f"Cargar nuevo archivo de {opcion}")
+                
+                if st.button("Guardar actualización"):
+                    if archivo_nuevo:
+                        # Mapeo de nombres para rutas de almacenamiento
+                        carpetas = {
+                            "Toxicológico": "conductores/toxicologicos",
+                            "Licencia": "conductores/licencias",
+                            "Comprobante de Estudios": "conductores/estudios",
+                            "Carta de Referencia": "conductores/referencias"
+                        }
+                        
+                        columna_db = {
+                            "Toxicológico": "url_toxicologico",
+                            "Licencia": "url_licencia",
+                            "Comprobante de Estudios": "url_comprobante_estudios",
+                            "Carta de Referencia": "url_carta_referencia"
+                        }
+                        
+                        # Subir archivo
+                        nueva_url = procesar_archivo(archivo_nuevo, carpetas[opcion], rfc_busqueda.upper())
+                        
+                        # Actualizar solo esa columna en Supabase
+                        supabase.table("alta_conductor").update({columna_db[opcion]: nueva_url}).eq("rfc", rfc_busqueda.upper()).execute()
+                        
+                        st.success(f"¡{opcion} actualizado correctamente!")
+                    else:
+                        st.warning("Por favor selecciona un archivo.")
+        else:
+            st.error("No se encontró ningún conductor con ese RFC.")
+
