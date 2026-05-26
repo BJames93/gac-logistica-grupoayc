@@ -239,7 +239,6 @@ with tab4:
                     fila = df[df['nombre_driver'] == sel]
                     if not fila.empty:
                         reg = fila.iloc[0].to_dict()
-                        
                         st.subheader(f"Expediente de: {sel}")
                         c1, c2 = st.columns([1, 2])
                         with c1:
@@ -249,20 +248,14 @@ with tab4:
                             foto = reg.get('url_fotografia')
                             if foto and isinstance(foto, str):
                                 st.image(foto, width=200, caption="Foto de Perfil")
-                        
                         with c2:
                             st.write("### Documentación Digital")
                             docs = {
-                                "Acta de Nacimiento": "url_acta_nacimiento",
-                                "CURP": "url_curp",
-                                "Seguro Social (NSS)": "url_seguro_social",
-                                "INE": "url_ine",
-                                "Constancia Fiscal": "url_constancia_fiscal",
-                                "Licencia de Conducir": "url_licencia",
-                                "Comprobante Domicilio": "url_comprobante_domicilio",
-                                "Carátula Bancaria": "url_caratula_bancaria",
-                                "Examen Toxicológico": "url_toxicologico",
-                                "Comprobante de Estudios": "url_comprobante_estudios",
+                                "Acta de Nacimiento": "url_acta_nacimiento", "CURP": "url_curp",
+                                "Seguro Social (NSS)": "url_seguro_social", "INE": "url_ine",
+                                "Constancia Fiscal": "url_constancia_fiscal", "Licencia de Conducir": "url_licencia",
+                                "Comprobante Domicilio": "url_comprobante_domicilio", "Carátula Bancaria": "url_caratula_bancaria",
+                                "Examen Toxicológico": "url_toxicologico", "Comprobante de Estudios": "url_comprobante_estudios",
                                 "Carta de Referencia": "url_carta_referencia"
                             }
                             for nombre, key in docs.items():
@@ -274,7 +267,7 @@ with tab4:
         except Exception as e:
             st.error(f"Error cargando conductores: {e}")
 
-    else: # --- Lógica de Unidades con las nuevas fotos ---
+    else: # --- LÓGICA DE UNIDADES CORREGIDA ---
         try:
             res = supabase.table("unidades").select("*").execute()
             df = pd.DataFrame(res.data)
@@ -292,28 +285,20 @@ with tab4:
                         st.write(f"**Tipo de Unidad:** {reg.get('tipo_unidad', 'N/A')}")
                         
                         st.write("### Documentación de Unidad")
-                        # Botones para documentos existentes
-                        if reg.get('url_tarjeta_circulacion'):
-                            st.link_button("📄 Ver Tarjeta de Circulación", reg['url_tarjeta_circulacion'])
-                        else:
-                            st.caption("❌ Tarjeta de Circulación: No cargado")
-                            
-                        if reg.get('url_poliza_seguro'):
-                            st.link_button("📄 Ver Póliza de Seguro", reg['url_poliza_seguro'])
-                        else:
-                            st.caption("❌ Póliza de Seguro: No cargado")
-                            
-                        # --- Botones nuevos de VIN y Placas ---
-                        if reg.get('url_vin'):
-                            st.link_button("📷 Ver Foto VIN", reg['url_vin'])
-                        else:
-                            st.caption("❌ Foto VIN: No cargado")
-                            
-                        if reg.get('url_placa'):
-                            st.link_button("📷 Ver Foto Placas", reg['url_placa'])
-                        else:
-                            st.caption("❌ Foto Placas: No cargado")
-                            
+                        # Mapa de documentos de unidad
+                        docs_u = {
+                            "Tarjeta de Circulación": "url_tarjeta_circulacion",
+                            "Póliza de Seguro": "url_poliza_seguro",
+                            "Fotografía VIN": "url_vin",
+                            "Fotografía Placas": "url_placa"
+                        }
+                        
+                        for nombre, key in docs_u.items():
+                            url = reg.get(key)
+                            if url and isinstance(url, str) and url.startswith("http"):
+                                st.link_button(f"📄 Ver {nombre}", url)
+                            else:
+                                st.caption(f"❌ {nombre}: No cargado")
         except Exception as e:
             st.error(f"Error cargando unidades: {e}")
 
