@@ -191,72 +191,58 @@ with tab4:
     if tipo_consulta == "Conductores":
         try:
             res = supabase.table("alta_conductor").select("*").execute()
+            # Convertimos a DataFrame de forma segura
             df = pd.DataFrame(res.data)
             
             if not df.empty:
-                sel = st.selectbox("Seleccione Conductor:", [""] + df['nombre_driver'].astype(str).tolist())
+                # Nos aseguramos de tratar los nombres como texto limpio
+                df['nombre_driver'] = df['nombre_driver'].fillna("").astype(str)
+                sel = st.selectbox("Seleccione Conductor:", [""] + df['nombre_driver'].tolist())
+                
                 if sel:
-                    reg = df[df['nombre_driver'] == sel].iloc[0]
-                    st.subheader(f"Expediente de: {sel}")
-                    
-                    c1, c2 = st.columns([1, 2])
-                    with c1:
-                        st.write(f"**RFC:** {reg.get('rfc', 'N/A')}")
-                        st.write(f"**Correo:** {reg.get('correo', 'N/A')}")
-                        st.write(f"**Celular:** {reg.get('celular', 'N/A')}")
-                        if reg.get('url_fotografia'):
-                            st.image(reg['url_fotografia'], width=200, caption="Foto de Perfil")
-                    
-                    with c2:
-                        st.write("### Documentación Digital")
-                        # Mapeo actualizado con Carta de Referencia
-                        docs = {
-                            "Acta de Nacimiento": "url_acta_nacimiento",
-                            "CURP": "url_curp",
-                            "Seguro Social (NSS)": "url_seguro_social",
-                            "INE": "url_ine",
-                            "Constancia Fiscal": "url_constancia_fiscal",
-                            "Licencia de Conducir": "url_licencia",
-                            "Comprobante Domicilio": "url_comprobante_domicilio",
-                            "Carátula Bancaria": "url_caratula_bancaria",
-                            "Examen Toxicológico": "url_toxicologico",
-                            "Comprobante de Estudios": "url_comprobante_estudios",
-                            "Carta de Referencia": "url_carta_referencia" # <-- Campo agregado
-                        }
-                        # Generación dinámica de botones
-                        for nombre, key in docs.items():
-                            url = reg.get(key)
-                            if url:
-                                st.link_button(f"📄 Ver {nombre}", url)
-                            else:
-                                st.caption(f"❌ {nombre}: No cargado")
+                    # Filtro seguro
+                    fila = df[df['nombre_driver'] == sel]
+                    if not fila.empty:
+                        reg = fila.iloc[0].to_dict() # Convertimos a diccionario para usar .get()
+                        
+                        st.subheader(f"Expediente de: {sel}")
+                        c1, c2 = st.columns([1, 2])
+                        
+                        with c1:
+                            st.write(f"**RFC:** {reg.get('rfc', 'N/A')}")
+                            st.write(f"**Correo:** {reg.get('correo', 'N/A')}")
+                            st.write(f"**Celular:** {reg.get('celular', 'N/A')}")
+                            foto = reg.get('url_fotografia')
+                            if foto and isinstance(foto, str):
+                                st.image(foto, width=200, caption="Foto de Perfil")
+                        
+                        with c2:
+                            st.write("### Documentación Digital")
+                            # Diccionario completo
+                            docs = {
+                                "Acta de Nacimiento": "url_acta_nacimiento",
+                                "CURP": "url_curp",
+                                "Seguro Social (NSS)": "url_seguro_social",
+                                "INE": "url_ine",
+                                "Constancia Fiscal": "url_constancia_fiscal",
+                                "Licencia de Conducir": "url_licencia",
+                                "Comprobante Domicilio": "url_comprobante_domicilio",
+                                "Carátula Bancaria": "url_caratula_bancaria",
+                                "Examen Toxicológico": "url_toxicologico",
+                                "Comprobante de Estudios": "url_comprobante_estudios",
+                                "Carta de Referencia": "url_carta_referencia"
+                            }
+                            
+                            for nombre, key in docs.items():
+                                url = reg.get(key)
+                                # Solo mostramos botón si la URL es válida
+                                if url and isinstance(url, str) and url.startswith("http"):
+                                    st.link_button(f"📄 Ver {nombre}", url)
+                                else:
+                                    st.caption(f"❌ {nombre}: No cargado")
         except Exception as e:
             st.error(f"Error cargando conductores: {e}")
-
-    else: # Consulta Unidades
-        try:
-            res = supabase.table("unidades").select("*").execute()
-            df = pd.DataFrame(res.data)
-            
-            if not df.empty:
-                sel = st.selectbox("Seleccione Placas de la Unidad:", [""] + df['placas'].astype(str).tolist())
-                if sel:
-                    reg = df[df['placas'] == sel].iloc[0]
-                    st.subheader(f"Unidad Placas: {sel}")
-                    st.write(f"**Marca:** {reg.get('marca', 'N/A')} | **Submarca:** {reg.get('submarca', 'N/A')} | **Modelo:** {reg.get('modelo', 'N/A')}")
-                    
-                    st.write("### Documentación de Unidad")
-                    if reg.get('url_tarjeta_circulacion'): 
-                        st.link_button("📄 Ver Tarjeta de Circulación", reg['url_tarjeta_circulacion'])
-                    else:
-                        st.caption("Tarjeta de Circulación: No cargado")
-                        
-                    if reg.get('url_poliza_seguro'): 
-                        st.link_button("📄 Ver Póliza de Seguro", reg['url_poliza_seguro'])
-                    else:
-                        st.caption("Póliza de Seguro: No cargado")
-        except Exception as e:
-            st.error(f"Error cargando unidades: {e}")
+            # Esto te ayudará a ver qué columna exacta falla
 
 # ===============================================
 # NUEVA PESTAÑA 5: ACTUALIZACION DE EXPEDIENTES
