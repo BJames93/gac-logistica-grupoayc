@@ -158,44 +158,55 @@ with tab2:
 # ==========================================
 with tab3:
     st.header("Captura Dinámica de Despacho Operativo")
-    # ... (tu lógica de consulta y diccionarios se mantiene igual)
+    st.write("Módulo relacional. Permite enlazar los conductores y unidades activos en sistema.")
+    
+    # 1. Definimos variables vacías por defecto
+    dict_conductores = {}
+    dict_unidades = {}
+    
+    # 2. Intentamos cargar datos
+    try:
+        conductores_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
+        unidades_db = supabase.table("unidades").select("id_unidad, placas").execute().data
+        
+        # Mapeo seguro
+        dict_conductores = {c["nombre_driver"]: c["id_conductor"] for c in conductores_db}
+        dict_unidades = {u["placas"]: u["id_unidad"] for u in unidades_db}
+    except Exception as e:
+        st.error(f"Error de sincronización con Supabase: {e}")
 
-    with st.form("form_operacion", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            sel_conductor = st.selectbox("Seleccione el Conductor asignado *", options=list(dict_conductores.keys()))
-            sel_unidad = st.selectbox("Seleccione las Placas del Vehículo *", options=list(dict_unidades.keys()))
-            status_operacion = st.selectbox("Estatus del Servicio", options=["En ruta", "Cancelacion", "No show"])
-        
-        with col2:
-            paquetes = st.number_input("Cantidad de Paquetes Cargados", min_value=0, step=1, value=0)
-            paradas = st.number_input("Número de Paradas Planificadas (Ruta)", min_value=0, step=1, value=0)
+    # 3. Verificamos que existan datos antes de mostrar el formulario
+    if not dict_conductores or not dict_unidades:
+        st.warning("⚠️ Atención: Debes tener conductores y unidades registrados para operar.")
+    else:
+        with st.form("form_operacion", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                sel_conductor = st.selectbox("Seleccione el Conductor asignado *", options=list(dict_conductores.keys()))
+                sel_unidad = st.selectbox("Seleccione las Placas del Vehículo *", options=list(dict_unidades.keys()))
+                status_operacion = st.selectbox("Estatus del Servicio", options=["En ruta", "Cancelacion", "No show"])
             
-        st.subheader("⏱️ Tiempos de Estancia en Hub")
-        t1, t2 = st.columns(2)
-        with t1:
-            fecha_llegada = st.date_input("Fecha de Llegada al Hub")
-            hora_llegada = st.time_input("Hora de Entrada (Hub)")
-        with t2:
-            fecha_salida = st.date_input("Fecha de Salida del Hub")
-            hora_salida = st.time_input("Hora de Despacho (Hub)")
+            with col2:
+                paquetes = st.number_input("Cantidad de Paquetes Cargados", min_value=0, step=1, value=0)
+                paradas = st.number_input("Número de Paradas Planificadas (Ruta)", min_value=0, step=1, value=0)
+                
+            st.subheader("⏱️ Tiempos de Estancia en Hub")
+            t1, t2 = st.columns(2)
+            with t1:
+                fecha_llegada = st.date_input("Fecha de Llegada al Hub")
+                hora_llegada = st.time_input("Hora de Entrada (Hub)")
+            with t2:
+                fecha_salida = st.date_input("Fecha de Salida del Hub")
+                hora_salida = st.time_input("Hora de Despacho (Hub)")
             
-        # --- AQUÍ MODIFICAMOS EL DISEÑO DE LOS BOTONES ---
-        # Creamos 2 columnas para poner los botones juntos
-        c_btn1, c_btn2 = st.columns([1, 4])
-        
-        with c_btn1:
-            # Este botón simplemente recarga la página y limpia el form
-            limpiar = st.form_submit_button("Limpiar")
+            # Botones dentro del form
+            c_btn1, c_btn2 = st.columns([1, 4])
+            with c_btn1:
+                limpiar = st.form_submit_button("Limpiar")
+            with c_btn2:
+                enviar_operacion = st.form_submit_button("Cerrar y Despachar Operación")
             
-        with c_btn2:
-            enviar_operacion = st.form_submit_button("Cerrar y Despachar Operación")
-        
-        # --- Lógica de envío ---
-        if enviar_operacion:
-            if not sel_conductor or not sel_unidad:
-                st.error("No se puede generar un registro sin asociar conductor y vehículo.")
-            else:
+            if enviar_operacion:
                 iso_llegada = datetime.combine(fecha_llegada, hora_llegada).isoformat()
                 iso_salida = datetime.combine(fecha_salida, hora_salida).isoformat()
                 
@@ -210,8 +221,7 @@ with tab3:
                 }
                 
                 supabase.table("registro_operacion").insert(datos_operacion).execute()
-                st.success(f"¡Viaje despachado correctamente!")
-
+                st.success("¡Viaje despachado correctamente!")
 # ==========================================
 # NUEVA PESTAÑA 4: CONSULTA DE EXPEDIENTES
 # ==========================================
