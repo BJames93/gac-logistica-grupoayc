@@ -158,23 +158,8 @@ with tab2:
 # ==========================================
 with tab3:
     st.header("Captura Dinámica de Despacho Operativo")
-    st.write("Módulo relacional. Permite enlazar los conductores y unidades activos en sistema.")
-    
-    # Consulta en tiempo real de registros para alimentar menús desplegables
-    try:
-        conductores_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
-        unidades_db = supabase.table("unidades").select("id_unidad, placas").execute().data
-    except Exception as e:
-        conductores_db, unidades_db = [], []
-        st.error(f"Error de sincronización de llaves foráneas: {e}")
+    # ... (tu lógica de consulta y diccionarios se mantiene igual)
 
-    # Estructuración de diccionarios de mapeo analítico (Nombre visible -> ID oculto UUID)
-    dict_conductores = {c["nombre_driver"]: c["id_conductor"] for c in conductores_db}
-    dict_unidades = {u["placas"]: u["id_unidad"] for u in unidades_db}
-    
-    if not dict_conductores or not dict_unidades:
-        st.warning("⚠️ Atención: Para realizar capturas operativas, primero debe registrar al menos un conductor y una unidad en las pestañas anteriores.")
-    
     with st.form("form_operacion", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
@@ -195,13 +180,22 @@ with tab3:
             fecha_salida = st.date_input("Fecha de Salida del Hub")
             hora_salida = st.time_input("Hora de Despacho (Hub)")
             
-        enviar_operacion = st.form_submit_button("Cerrar y Despachar Operación")
+        # --- AQUÍ MODIFICAMOS EL DISEÑO DE LOS BOTONES ---
+        # Creamos 2 columnas para poner los botones juntos
+        c_btn1, c_btn2 = st.columns([1, 4])
         
+        with c_btn1:
+            # Este botón simplemente recarga la página y limpia el form
+            limpiar = st.form_submit_button("Limpiar")
+            
+        with c_btn2:
+            enviar_operacion = st.form_submit_button("Cerrar y Despachar Operación")
+        
+        # --- Lógica de envío ---
         if enviar_operacion:
             if not sel_conductor or not sel_unidad:
-                st.error("No se puede generar un registro de operación sin asociar un conductor y vehículo válidos.")
+                st.error("No se puede generar un registro sin asociar conductor y vehículo.")
             else:
-                # Combinamos fecha e ingresos de hora en formato ISO string compatible con TIMESTAMP WITH TIME ZONE
                 iso_llegada = datetime.combine(fecha_llegada, hora_llegada).isoformat()
                 iso_salida = datetime.combine(fecha_salida, hora_salida).isoformat()
                 
@@ -216,7 +210,7 @@ with tab3:
                 }
                 
                 supabase.table("registro_operacion").insert(datos_operacion).execute()
-                st.success(f"¡Viaje despachado correctamente! Operador asignado: {sel_conductor} | Estatus: {status_operacion}")
+                st.success(f"¡Viaje despachado correctamente!")
 
 # ==========================================
 # NUEVA PESTAÑA 4: CONSULTA DE EXPEDIENTES
