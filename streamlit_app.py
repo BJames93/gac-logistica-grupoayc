@@ -122,12 +122,14 @@ with tab2:
         m = st.text_input("Marca")
         sm = st.text_input("Submarca")
         
-        # Nuevo selector para el tipo de unidad
         tipo = st.selectbox("Tipo de Unidad", ["Sedan", "Small", "Large"])
-        
         mod = st.number_input("Modelo", 1990, 2030, 2026)
+        
+        # Nuevos campos de carga
         f_circ = st.file_uploader("Tarjeta Circulación")
         f_seg = st.file_uploader("Seguro")
+        f_vin = st.file_uploader("Fotografía VIN")
+        f_plac = st.file_uploader("Fotografía Placas")
         
         enviar_u = st.form_submit_button("Registrar Unidad")
         if enviar_u:
@@ -139,9 +141,11 @@ with tab2:
                     "modelo": int(mod), 
                     "marca": m, 
                     "submarca": sm,
-                    "tipo_unidad": tipo, # <-- Nuevo campo registrado
+                    "tipo_unidad": tipo,
                     "url_tarjeta_circulacion": procesar_archivo(f_circ, "unidades/tarjetas", p),
-                    "url_poliza_seguro": procesar_archivo(f_seg, "unidades/polizas", p)
+                    "url_poliza_seguro": procesar_archivo(f_seg, "unidades/polizas", p),
+                    "url_vin": procesar_archivo(f_vin, "unidades/vin", p),
+                    "url_placa": procesar_archivo(f_plac, "unidades/placas", p)
                 }
                 try:
                     supabase.table("unidades").insert(datos_u).execute()
@@ -270,7 +274,7 @@ with tab4:
         except Exception as e:
             st.error(f"Error cargando conductores: {e}")
 
-    else: # --- AQUÍ AGREGAMOS LA LÓGICA DE UNIDADES ---
+    else: # --- Lógica de Unidades con las nuevas fotos ---
         try:
             res = supabase.table("unidades").select("*").execute()
             df = pd.DataFrame(res.data)
@@ -284,12 +288,11 @@ with tab4:
                     if not fila.empty:
                         reg = fila.iloc[0].to_dict()
                         st.subheader(f"Unidad Placas: {sel}")
-                        # Mostramos los datos incluyendo el nuevo campo tipo_unidad
                         st.write(f"**Marca:** {reg.get('marca', 'N/A')} | **Submarca:** {reg.get('submarca', 'N/A')} | **Modelo:** {reg.get('modelo', 'N/A')}")
                         st.write(f"**Tipo de Unidad:** {reg.get('tipo_unidad', 'N/A')}")
                         
                         st.write("### Documentación de Unidad")
-                        # Botones para documentos de unidad
+                        # Botones para documentos existentes
                         if reg.get('url_tarjeta_circulacion'):
                             st.link_button("📄 Ver Tarjeta de Circulación", reg['url_tarjeta_circulacion'])
                         else:
@@ -299,6 +302,18 @@ with tab4:
                             st.link_button("📄 Ver Póliza de Seguro", reg['url_poliza_seguro'])
                         else:
                             st.caption("❌ Póliza de Seguro: No cargado")
+                            
+                        # --- Botones nuevos de VIN y Placas ---
+                        if reg.get('url_vin'):
+                            st.link_button("📷 Ver Foto VIN", reg['url_vin'])
+                        else:
+                            st.caption("❌ Foto VIN: No cargado")
+                            
+                        if reg.get('url_placa'):
+                            st.link_button("📷 Ver Foto Placas", reg['url_placa'])
+                        else:
+                            st.caption("❌ Foto Placas: No cargado")
+                            
         except Exception as e:
             st.error(f"Error cargando unidades: {e}")
 
