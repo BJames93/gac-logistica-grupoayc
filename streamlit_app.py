@@ -121,19 +121,33 @@ with tab2:
         p = st.text_input("Placas")
         m = st.text_input("Marca")
         sm = st.text_input("Submarca")
+        
+        # Nuevo selector para el tipo de unidad
+        tipo = st.selectbox("Tipo de Unidad", ["Sedan", "Small", "Large"])
+        
         mod = st.number_input("Modelo", 1990, 2030, 2026)
         f_circ = st.file_uploader("Tarjeta Circulación")
         f_seg = st.file_uploader("Seguro")
         
         enviar_u = st.form_submit_button("Registrar Unidad")
         if enviar_u:
-            datos_u = {
-                "placas": p.upper(), "modelo": int(mod), "marca": m, "submarca": sm,
-                "url_tarjeta_circulacion": procesar_archivo(f_circ, "unidades/tarjetas", p),
-                "url_poliza_seguro": procesar_archivo(f_seg, "unidades/polizas", p)
-            }
-            supabase.table("unidades").insert(datos_u).execute()
-            st.success("Unidad registrada")
+            if not p:
+                st.error("Las placas son obligatorias.")
+            else:
+                datos_u = {
+                    "placas": p.upper(), 
+                    "modelo": int(mod), 
+                    "marca": m, 
+                    "submarca": sm,
+                    "tipo_unidad": tipo, # <-- Nuevo campo registrado
+                    "url_tarjeta_circulacion": procesar_archivo(f_circ, "unidades/tarjetas", p),
+                    "url_poliza_seguro": procesar_archivo(f_seg, "unidades/polizas", p)
+                }
+                try:
+                    supabase.table("unidades").insert(datos_u).execute()
+                    st.success("Unidad registrada exitosamente")
+                except Exception as e:
+                    st.error(f"Error al registrar la unidad: {e}")
 
 # ==========================================
 # PESTAÑA 3: REGISTRO DE OPERACIÓN
@@ -211,23 +225,19 @@ with tab4:
     if tipo_consulta == "Conductores":
         try:
             res = supabase.table("alta_conductor").select("*").execute()
-            # Convertimos a DataFrame de forma segura
             df = pd.DataFrame(res.data)
             
             if not df.empty:
-                # Nos aseguramos de tratar los nombres como texto limpio
                 df['nombre_driver'] = df['nombre_driver'].fillna("").astype(str)
                 sel = st.selectbox("Seleccione Conductor:", [""] + df['nombre_driver'].tolist())
                 
                 if sel:
-                    # Filtro seguro
                     fila = df[df['nombre_driver'] == sel]
                     if not fila.empty:
-                        reg = fila.iloc[0].to_dict() # Convertimos a diccionario para usar .get()
+                        reg = fila.iloc[0].to_dict()
                         
                         st.subheader(f"Expediente de: {sel}")
                         c1, c2 = st.columns([1, 2])
-                        
                         with c1:
                             st.write(f"**RFC:** {reg.get('rfc', 'N/A')}")
                             st.write(f"**Correo:** {reg.get('correo', 'N/A')}")
@@ -238,7 +248,6 @@ with tab4:
                         
                         with c2:
                             st.write("### Documentación Digital")
-                            # Diccionario completo
                             docs = {
                                 "Acta de Nacimiento": "url_acta_nacimiento",
                                 "CURP": "url_curp",
@@ -252,17 +261,46 @@ with tab4:
                                 "Comprobante de Estudios": "url_comprobante_estudios",
                                 "Carta de Referencia": "url_carta_referencia"
                             }
-                            
                             for nombre, key in docs.items():
                                 url = reg.get(key)
-                                # Solo mostramos botón si la URL es válida
                                 if url and isinstance(url, str) and url.startswith("http"):
                                     st.link_button(f"📄 Ver {nombre}", url)
                                 else:
                                     st.caption(f"❌ {nombre}: No cargado")
         except Exception as e:
             st.error(f"Error cargando conductores: {e}")
-            # Esto te ayudará a ver qué columna exacta falla
+
+    else: # --- AQUÍ AGREGAMOS LA LÓGICA DE UNIDADES ---
+        try:
+            res = supabase.table("unidades").select("*").execute()
+            df = pd.DataFrame(res.data)
+            
+            if not df.empty:
+                df['placas'] = df['placas'].fillna("").astype(str)
+                sel = st.selectbox("Seleccione Placas de la Unidad:", [""] + df['placas'].tolist())
+                
+                if sel:
+                    fila = df[df['placas'] == sel]
+                    if not fila.empty:
+                        reg = fila.iloc[0].to_dict()
+                        st.subheader(f"Unidad Placas: {sel}")
+                        # Mostramos los datos incluyendo el nuevo campo tipo_unidad
+                        st.write(f"**Marca:** {reg.get('marca', 'N/A')} | **Submarca:** {reg.get('submarca', 'N/A')} | **Modelo:** {reg.get('modelo', 'N/A')}")
+                        st.write(f"**Tipo de Unidad:** {reg.get('tipo_unidad', 'N/A')}")
+                        
+                        st.write("### Documentación de Unidad")
+                        # Botones para documentos de unidad
+                        if reg.get('url_tarjeta_circulacion'):
+                            st.link_button("📄 Ver Tarjeta de Circulación", reg['url_tarjeta_circulacion'])
+                        else:
+                            st.caption("❌ Tarjeta de Circulación: No cargado")
+                            
+                        if reg.get('url_poliza_seguro'):
+                            st.link_button("📄 Ver Póliza de Seguro", reg['url_poliza_seguro'])
+                        else:
+                            st.caption("❌ Póliza de Seguro: No cargado")
+        except Exception as e:
+            st.error(f"Error cargando unidades: {e}")
 
 # ===============================================
 # NUEVA PESTAÑA 5: ACTUALIZACION DE EXPEDIENTES
