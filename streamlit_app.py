@@ -25,7 +25,7 @@ def procesar_archivo(archivo, carpeta, identificador):
 # --- INTERFAZ ---
 st.set_page_config(layout="wide")
 st.title("📊 Sistema Centralizado Grupo AyC")
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🚗 Alta de Conductores", "🚛 Control de Unidades", "📋 Registro de Operación","🔍 Consulta Integral","🔄 Actualización"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🚗 Alta de Conductores", "🚛 Control de Unidades", "📋 Registro de Operación","🔍 Consulta Integral","🔄 Actualización de Expedientes"])
 
 # ==========================================
 # PESTAÑA 1: ALTA DE CONDUCTOR
