@@ -2,21 +2,41 @@ import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
 import pandas as pd
+import unicodedata # <--- Importante para limpiar acentos
 
 # --- 1. CONFIGURACIÓN E INICIALIZACIÓN DE CREDENCIALES ---
 SUPABASE_URL = "https://wfdhuzlohwcemfjeudrl.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndmZGh1emxvaHdjZW1mamV1ZHJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNDM0NDEsImV4cCI6MjA5NDgxOTQ0MX0.ecnOCJnMDxHpYHuZmAvR5Fy95utOsFZ1Xjg3Xzyj8UM"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-BUCKET_NAME="documentos_operacion"
+BUCKET_NAME = "documentos_operacion"
 
-# Función para subir a Storage
+# Función para limpiar caracteres especiales (acentos, ñ, espacios)
+def limpiar_texto(texto):
+    # Elimina acentos (ej: á -> a)
+    nfkd_form = unicodedata.normalize('NFKD', texto)
+    solo_ascii = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+    # Cambia espacios y caracteres raros por guiones bajos, quita ñ
+    return solo_ascii.replace(" ", "_").replace("ñ", "n").replace("Ñ", "N")
+
+# Función mejorada para subir a Storage
 def procesar_archivo(archivo, carpeta, identificador):
     if archivo is not None:
         try:
-            ruta = f"{carpeta}/{identificador}_{archivo.name.replace(' ', '_')}"
-            supabase.storage.from_(BUCKET_NAME).upload(path=ruta, file=archivo.getvalue(), file_options={"content-type": archivo.type})
+            # Limpiamos nombres para evitar error InvalidKey
+            nombre_limpio = limpiar_texto(archivo.name)
+            carpeta_limpia = limpiar_texto(carpeta)
+            
+            ruta = f"{carpeta_limpia}/{identificador}_{nombre_limpio}"
+            
+            # Subimos con upsert="true" para evitar el error de archivo duplicado
+            supabase.storage.from_(BUCKET_NAME).upload(
+                path=ruta, 
+                file=archivo.getvalue(), 
+                file_options={"content-type": archivo.type, "upsert": "true"}
+            )
             return supabase.storage.from_(BUCKET_NAME).get_public_url(ruta)
+            
         except Exception as e:
             st.error(f"Error en {archivo.name}: {e}")
             return None
