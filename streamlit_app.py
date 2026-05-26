@@ -40,22 +40,29 @@ with tab1:
         with col2:
             celular = st.text_input("Celular")
         
+        # Reorganización para equilibrar el espacio visual
         c1, c2, c3 = st.columns(3)
         with c1:
             f_foto = st.file_uploader("Foto")
             f_acta = st.file_uploader("Acta")
             f_curp = st.file_uploader("CURP")
-            f_nss = st.file_uploader("NSS")
         with c2:
+            f_nss = st.file_uploader("NSS")
             f_ine = st.file_uploader("INE")
             f_fis = st.file_uploader("Constancia Fiscal")
-            f_lic = st.file_uploader("Licencia")
         with c3:
+            f_lic = st.file_uploader("Licencia")
             f_dom = st.file_uploader("Domicilio")
             f_ban = st.file_uploader("Banco")
+        
+        # Nueva fila o sección inferior para los restantes si quieres que se vea aún más limpio
+        c4, c5, c6 = st.columns(3)
+        with c4:
             f_tox = st.file_uploader("Toxicológico")
+        with c5:
             f_est = st.file_uploader("Comprobante de Estudios")
-            f_ref = st.file_uploader("Carta de Referencia") # <-- Nuevo campo
+        with c6:
+            f_ref = st.file_uploader("Carta de Referencia")
             
         enviar = st.form_submit_button("Guardar Conductor")
         if enviar:
@@ -78,7 +85,7 @@ with tab1:
                     "url_caratula_bancaria": procesar_archivo(f_ban, "conductores/bancos", rfc),
                     "url_toxicologico": procesar_archivo(f_tox, "conductores/toxicologicos", rfc),
                     "url_comprobante_estudios": procesar_archivo(f_est, "conductores/estudios", rfc),
-                    "url_carta_referencia": procesar_archivo(f_ref, "conductores/referencias", rfc) # <-- Nueva ruta
+                    "url_carta_referencia": procesar_archivo(f_ref, "conductores/referencias", rfc)
                 }
                 try:
                     supabase.table("alta_conductor").insert(datos).execute()
