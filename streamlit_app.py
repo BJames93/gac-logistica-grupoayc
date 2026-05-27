@@ -3,6 +3,9 @@ from supabase import create_client, Client
 from datetime import datetime
 import pandas as pd
 import unicodedata # <--- Importante para limpiar acentos
+import io
+import zipfile
+import requests
 
 # --- 1. CONFIGURACIÓN E INICIALIZACIÓN DE CREDENCIALES ---
 SUPABASE_URL = "https://wfdhuzlohwcemfjeudrl.supabase.co"
@@ -239,6 +242,23 @@ with tab4:
     st.header("🔍 Consulta Integral de Expedientes")
     tipo_consulta = st.radio("¿Qué desea consultar?", ["Conductores", "Unidades"], horizontal=True)
     
+    # Función de apoyo para crear el archivo ZIP en memoria
+    def generar_zip(diccionario_documentos):
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for nombre, url in diccionario_documentos.items():
+                try:
+                    respuesta = requests.get(url)
+                    if respuesta.status_code == 200:
+                        # Extraemos la extensión del archivo (pdf, jpg, etc.)
+                        ext = url.split('.')[-1]
+                        if len(ext) > 4 or not ext.isalnum():
+                            ext = "pdf" # Extensión por defecto si no es clara
+                        zip_file.writestr(f"{nombre}.{ext}", respuesta.content)
+                except Exception:
+                    pass # Si un archivo falla al descargar, simplemente lo omite
+        return zip_buffer.getvalue()
+
     if tipo_consulta == "Conductores":
         try:
             res = supabase.table("alta_conductor").select("*").execute()
@@ -271,16 +291,31 @@ with tab4:
                                 "Examen Toxicológico": "url_toxicologico", "Comprobante de Estudios": "url_comprobante_estudios",
                                 "Carta de Referencia": "url_carta_referencia"
                             }
+                            
+                            # Diccionario para almacenar solo los enlaces válidos
+                            documentos_validos = {}
+                            
                             for nombre, key in docs.items():
                                 url = reg.get(key)
                                 if url and isinstance(url, str) and url.startswith("http"):
                                     st.link_button(f"📄 Ver {nombre}", url)
+                                    documentos_validos[nombre] = url # Guardamos para el ZIP
                                 else:
                                     st.caption(f"❌ {nombre}: No cargado")
+                            
+                            # --- BOTÓN DE DESCARGA MASIVA ---
+                            if documentos_validos:
+                                st.write("---")
+                                st.download_button(
+                                    label="📦 Descargar Expediente en ZIP",
+                                    data=generar_zip(documentos_validos),
+                                    file_name=f"Expediente_{sel.replace(' ', '_')}.zip",
+                                    mime="application/zip"
+                                )
         except Exception as e:
             st.error(f"Error cargando conductores: {e}")
 
-    else: # --- LÓGICA DE UNIDADES CORREGIDA ---
+    else: # --- LÓGICA DE UNIDADES ---
         try:
             res = supabase.table("unidades").select("*").execute()
             df = pd.DataFrame(res.data)
@@ -298,7 +333,6 @@ with tab4:
                         st.write(f"**Tipo de Unidad:** {reg.get('tipo_unidad', 'N/A')}")
                         
                         st.write("### Documentación de Unidad")
-                        # Mapa de documentos de unidad
                         docs_u = {
                             "Tarjeta de Circulación": "url_tarjeta_circulacion",
                             "Póliza de Seguro": "url_poliza_seguro",
@@ -306,12 +340,25 @@ with tab4:
                             "Fotografía Placas": "url_placa"
                         }
                         
+                        documentos_u_validos = {}
+                        
                         for nombre, key in docs_u.items():
                             url = reg.get(key)
                             if url and isinstance(url, str) and url.startswith("http"):
                                 st.link_button(f"📄 Ver {nombre}", url)
+                                documentos_u_validos[nombre] = url # Guardamos para el ZIP
                             else:
                                 st.caption(f"❌ {nombre}: No cargado")
+                                
+                        # --- BOTÓN DE DESCARGA MASIVA ---
+                        if documentos_u_validos:
+                            st.write("---")
+                            st.download_button(
+                                label="📦 Descargar Documentos en ZIP",
+                                data=generar_zip(documentos_u_validos),
+                                file_name=f"Unidad_{sel.replace(' ', '_')}.zip",
+                                mime="application/zip"
+                            )
         except Exception as e:
             st.error(f"Error cargando unidades: {e}")
 
