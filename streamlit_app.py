@@ -62,9 +62,10 @@ with tab1:
             correo = st.text_input("Correo")
         with col2:
             celular = st.text_input("Celular")
-            # --- NUEVOS CAMPOS BANCARIOS ---
+            # --- NUEVOS CAMPOS BANCARIOS CON CONTROL DE CARACTERES ---
             banco = st.text_input("Nombre Banco")
-            clabe = st.text_input("Clabe Interbancaria")
+            # max_chars=18 impide físicamente que se escriban más de 18 dígitos
+            clabe = st.text_input("Clabe Interbancaria", max_chars=18, help="La CLABE debe tener exactamente 18 dígitos numéricos.")
         
         # Reorganización para equilibrar el espacio visual
         c1, c2, c3 = st.columns(3)
@@ -79,7 +80,7 @@ with tab1:
         with c3:
             f_lic = st.file_uploader("Licencia")
             f_dom = st.file_uploader("Domicilio")
-            f_ban = st.file_uploader("Banco (Archivo)") # Aclarado para no confundir con el texto
+            f_ban = st.file_uploader("Banco (Archivo)") 
         
         # Nueva fila o sección inferior para los restantes
         c4, c5, c6 = st.columns(3)
@@ -94,14 +95,21 @@ with tab1:
         if enviar:
             if not nombre or not rfc:
                 st.error("Por favor completa los campos obligatorios (Nombre y RFC)")
+            
+            # --- VALIDACIONES PARA LA CLABE INTERBANCARIA ---
+            elif clabe and len(clabe) < 18:
+                st.error(f"La CLABE Interbancaria está incompleta. Ingresaste {len(clabe)} dígitos de los 18 requeridos.")
+            elif clabe and not clabe.isdigit():
+                st.error("La CLABE Interbancaria solo debe contener caracteres numéricos (números del 0 al 9).")
+                
             else:
                 datos = {
                     "nombre_driver": nombre, 
                     "rfc": rfc.upper(), 
                     "correo": correo, 
                     "celular": celular,
-                    "nombre_banco": banco,           # <-- Se envía a Supabase
-                    "clabe_interbancaria": clabe,    # <-- Se envía a Supabase
+                    "nombre_banco": banco,           
+                    "clabe_interbancaria": clabe,    
                     "url_fotografia": procesar_archivo(f_foto, "conductores/fotos", rfc),
                     "url_acta_nacimiento": procesar_archivo(f_acta, "conductores/actas", rfc),
                     "url_curp": procesar_archivo(f_curp, "conductores/curps", rfc),
