@@ -303,6 +303,10 @@ with tab4:
                             st.write(f"**RFC:** {reg.get('rfc', 'N/A')}")
                             st.write(f"**Correo:** {reg.get('correo', 'N/A')}")
                             st.write(f"**Celular:** {reg.get('celular', 'N/A')}")
+                            # --- NUEVOS CAMPOS BANCARIOS ---
+                            st.write(f"**Banco:** {reg.get('nombre_banco', 'N/A') or 'N/A'}")
+                            st.write(f"**CLABE:** {reg.get('clabe_interbancaria', 'N/A') or 'N/A'}")
+                            
                             foto = reg.get('url_fotografia')
                             if foto and isinstance(foto, str):
                                 st.image(foto, width=200, caption="Foto de Perfil")
