@@ -396,7 +396,7 @@ with tab4:
 # ===============================================
 with tab5:
     st.header("🔄 Actualización de Expedientes")
-    st.info("Utiliza esta sección para subir documentos faltantes, renovaciones o actualizar datos de contacto.")
+    st.info("Utiliza esta sección para subir documentos faltantes, renovaciones o actualizar datos de contacto y bancarios.")
     
     rfc_busqueda = st.text_input("Ingresa el RFC del conductor para actualizar:")
     
@@ -407,6 +407,10 @@ with tab5:
             reg = res.data[0]
             st.write(f"Conductor encontrado: **{reg['nombre_driver']}**")
             st.write(f"Celular actual: **{reg.get('celular', 'No registrado')}**")
+            # --- MOSTRAMOS LOS DATOS BANCARIOS ACTUALES ---
+            banco_actual = reg.get('nombre_banco') or 'No registrado'
+            clabe_actual = reg.get('clabe_interbancaria') or 'No registrado'
+            st.write(f"Banco actual: **{banco_actual}** | CLABE actual: **{clabe_actual}**")
             
             # --- AYUDA VISUAL PARA EL USUARIO ---
             st.write("---")
@@ -425,15 +429,36 @@ with tab5:
                 cols[i % 3].write(f"{status} {nombre}")
             st.write("---")
             
-            # Selector extendido
-            opcion = st.selectbox("¿Qué deseas actualizar?", [""] + list(docs_map.keys()) + ["Actualizar Número de Celular"])
+            # --- SELECTOR EXTENDIDO CON DATOS BANCARIOS ---
+            opcion = st.selectbox("¿Qué deseas actualizar?", [""] + list(docs_map.keys()) + ["Actualizar Número de Celular", "Actualizar Datos Bancarios"])
             
             if opcion == "Actualizar Número de Celular":
-                nuevo_celular = st.text_input("Nuevo número de celular:")
+                # Mostramos el valor actual en la caja de texto para que sea más fácil editar
+                nuevo_celular = st.text_input("Nuevo número de celular:", value=reg.get('celular') or "")
                 if st.button("Guardar nuevo celular"):
                     supabase.table("alta_conductor").update({"celular": nuevo_celular}).eq("rfc", rfc_busqueda.upper()).execute()
-                    st.success("¡Celular actualizado correctamente!")
+                    st.success("¡Celular actualizado correctamente! Recarga la página para ver el cambio.")
             
+            # --- NUEVA LÓGICA PARA ACTUALIZAR BANCO Y CLABE ---
+            elif opcion == "Actualizar Datos Bancarios":
+                nuevo_banco = st.text_input("Nuevo Nombre del Banco:", value=reg.get('nombre_banco') or "")
+                # Bloqueo físico de 18 caracteres
+                nueva_clabe = st.text_input("Nueva CLABE Interbancaria:", max_chars=18, value=reg.get('clabe_interbancaria') or "")
+                
+                if st.button("Guardar datos bancarios"):
+                    # Validaciones de la CLABE (igual que en el alta)
+                    if nueva_clabe and len(nueva_clabe) < 18:
+                        st.error(f"La CLABE está incompleta. Ingresaste {len(nueva_clabe)} dígitos de los 18 requeridos.")
+                    elif nueva_clabe and not nueva_clabe.isdigit():
+                        st.error("La CLABE solo debe contener números.")
+                    else:
+                        supabase.table("alta_conductor").update({
+                            "nombre_banco": nuevo_banco,
+                            "clabe_interbancaria": nueva_clabe
+                        }).eq("rfc", rfc_busqueda.upper()).execute()
+                        st.success("¡Datos bancarios actualizados correctamente! Recarga la página para ver el cambio.")
+            
+            # --- LÓGICA PARA ARCHIVOS ---
             elif opcion in docs_map:
                 archivo_nuevo = st.file_uploader(f"Cargar nuevo archivo de {opcion}")
                 if st.button("Guardar actualización"):
@@ -445,7 +470,7 @@ with tab5:
                         nueva_url = procesar_archivo(archivo_nuevo, ruta_storage, rfc_busqueda.upper())
                         
                         supabase.table("alta_conductor").update({columna_db: nueva_url}).eq("rfc", rfc_busqueda.upper()).execute()
-                        st.success(f"¡{opcion} actualizado correctamente!")
+                        st.success(f"¡{opcion} actualizado correctamente! Recarga la página para ver el cambio.")
                     else:
                         st.warning("Por favor selecciona un archivo.")
         else:
