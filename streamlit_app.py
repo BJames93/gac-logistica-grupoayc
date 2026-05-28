@@ -48,7 +48,7 @@ def procesar_archivo(archivo, carpeta, identificador):
 # --- INTERFAZ ---
 st.set_page_config(layout="wide")
 st.title("📊 Sistema Centralizado Grupo AyC")
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🚗 Alta de Conductores", "🚛 Control de Unidades", "📋 Registro de Operación","🔍 Consulta Integral","🔄 Actualización de Expedientes"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🚗 Alta de Conductores", "🚛 Control de Unidades", "📋 Registro de Operación","🔍 Consulta Integral","🔄 Actualización de Expedientes","📊 Verificación de Captura"])
 
 # ==========================================
 # PESTAÑA 1: ALTA DE CONDUCTOR
@@ -475,3 +475,87 @@ with tab5:
                         st.warning("Por favor selecciona un archivo.")
         else:
             st.error("No se encontró ningún conductor con ese RFC.")
+
+
+# ===============================================
+# NUEVA PESTAÑA 6: VERIFICACION DE CAPTURA
+# ===============================================
+with tab6:
+    st.header("📊 Verificación de Captura")
+    st.write("Consulta y verifica los despachos operativos registrados en el sistema.")
+    
+    # --- FILTROS DE FECHA ---
+    c_ini, c_fin = st.columns(2)
+    with c_ini:
+        fecha_inicio = st.date_input("Fecha de Inicio")
+    with c_fin:
+        fecha_fin = st.date_input("Fecha de Término")
+        
+    if st.button("Buscar Capturas"):
+        try:
+            # 1. Extraemos toda la base de operaciones
+            res_op = supabase.table("registro_operacion").select("*").execute()
+            df_op = pd.DataFrame(res_op.data)
+            
+            if not df_op.empty:
+                # 2. Extraemos diccionarios para traducir IDs a Nombres reales
+                cond_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
+                unid_db = supabase.table("unidades").select("id_unidad, placas").execute().data
+                
+                # Creamos los mapas de traducción (ID -> Nombre/Placa)
+                map_cond = {c["id_conductor"]: c["nombre_driver"] for c in cond_db}
+                map_unid = {u["id_unidad"]: u["placas"] for u in unid_db}
+                
+                # Aplicamos la traducción al DataFrame
+                df_op["Conductor"] = df_op["conductor_id"].map(map_cond)
+                df_op["Placas"] = df_op["unidad_id"].map(map_unid)
+                
+                # 3. Procesamiento y filtro de fechas
+                # Convertimos el texto ISO a formato fecha/hora de pandas
+                df_op["hora_llegada_hub"] = pd.to_datetime(df_op["hora_llegada_hub"]).dt.tz_localize(None)
+                
+                # Filtramos por el rango seleccionado
+                mascara = (df_op["hora_llegada_hub"].dt.date >= fecha_inicio) & (df_op["hora_llegada_hub"].dt.date <= fecha_fin)
+                df_filtrado = df_op.loc[mascara].copy()
+                
+                if not df_filtrado.empty:
+                    # Formateamos la hora para que se vea limpia en la tabla
+                    df_filtrado["hora_llegada_hub"] = df_filtrado["hora_llegada_hub"].dt.strftime('%Y-%m-%d %H:%M')
+                    
+                    # --- PEQUEÑO DASHBOARD (MÉTRICAS) ---
+                    st.write("---")
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Total de Viajes", len(df_filtrado))
+                    m2.metric("Paquetes Procesados", int(df_filtrado["paquetes_cargados"].sum()))
+                    m3.metric("Paradas Planificadas", int(df_filtrado["paradas"].sum()))
+                    st.write("---")
+                    
+                    # --- TABLA DE VERIFICACIÓN ---
+                    # Seleccionamos y renombramos las columnas exactamente como lo pediste
+                    df_mostrar = df_filtrado[[
+                        "hora_llegada_hub", 
+                        "Conductor", 
+                        "Placas", 
+                        "tipo_cliente", 
+                        "status_operacion", 
+                        "paquetes_cargados", 
+                        "paradas"
+                    ]].rename(columns={
+                        "hora_llegada_hub": "Hora de Arribo",
+                        "tipo_cliente": "Tipo",
+                        "status_operacion": "Condición",
+                        "paquetes_cargados": "Paquetes",
+                        "paradas": "Paradas"
+                    })
+                    
+                    # Mostramos la tabla interactiva
+                    st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+                    
+                else:
+                    st.warning(f"No se encontraron capturas registradas entre {fecha_inicio} y {fecha_fin}.")
+            else:
+                st.info("Aún no hay registros de operaciones en la base de datos.")
+                
+        except Exception as e:
+            st.error(f"Error al generar la consulta: {e}")
+
