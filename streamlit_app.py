@@ -58,7 +58,8 @@ with tab1:
         col1, col2 = st.columns(2)
         with col1:
             nombre = st.text_input("Nombre Completo *")
-            rfc = st.text_input("RFC *")
+            # max_chars=13 impide físicamente escribir más caracteres
+            rfc = st.text_input("RFC *", max_chars=13, help="El RFC para personas físicas debe tener exactamente 13 caracteres.")
             correo = st.text_input("Correo")
         with col2:
             celular = st.text_input("Celular")
@@ -95,6 +96,10 @@ with tab1:
         if enviar:
             if not nombre or not rfc:
                 st.error("Por favor completa los campos obligatorios (Nombre y RFC)")
+            
+            # --- VALIDACIÓN PARA EL RFC ---
+            elif len(rfc) < 13:
+                st.error(f"El RFC está incompleto. Ingresaste {len(rfc)} caracteres de los 13 requeridos.")
             
             # --- VALIDACIONES PARA LA CLABE INTERBANCARIA ---
             elif clabe and len(clabe) < 18:
