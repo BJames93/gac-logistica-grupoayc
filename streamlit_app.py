@@ -498,17 +498,21 @@ with tab6:
             df_op = pd.DataFrame(res_op.data)
             
             if not df_op.empty:
-                # 2. Extraemos diccionarios para traducir IDs a Nombres reales
+                # 2. Extraemos diccionarios para traducir IDs a Nombres reales y tipos
                 cond_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
-                unid_db = supabase.table("unidades").select("id_unidad, placas").execute().data
+                # Añadimos 'tipo_unidad' a la consulta de unidades
+                unid_db = supabase.table("unidades").select("id_unidad, placas, tipo_unidad").execute().data
                 
-                # Creamos los mapas de traducción (ID -> Nombre/Placa)
+                # Creamos los mapas de traducción
                 map_cond = {c["id_conductor"]: c["nombre_driver"] for c in cond_db}
                 map_unid = {u["id_unidad"]: u["placas"] for u in unid_db}
+                # Nuevo mapa para extraer el tipo de unidad
+                map_tipo_unid = {u["id_unidad"]: u.get("tipo_unidad", "N/A") for u in unid_db}
                 
                 # Aplicamos la traducción al DataFrame
                 df_op["Conductor"] = df_op["conductor_id"].map(map_cond)
                 df_op["Placas"] = df_op["unidad_id"].map(map_unid)
+                df_op["Tipo Unidad"] = df_op["unidad_id"].map(map_tipo_unid) # <-- Agregamos el tipo de vehículo
                 
                 # 3. Procesamiento y filtro de fechas
                 # Convertimos el texto ISO a formato fecha/hora de pandas
@@ -531,18 +535,19 @@ with tab6:
                     st.write("---")
                     
                     # --- TABLA DE VERIFICACIÓN ---
-                    # Seleccionamos y renombramos las columnas exactamente como lo pediste
+                    # Seleccionamos y renombramos las columnas incluyendo el nuevo campo
                     df_mostrar = df_filtrado[[
                         "hora_llegada_hub", 
                         "Conductor", 
                         "Placas", 
-                        "tipo_cliente", 
+                        "Tipo Unidad",       # <-- Sedan, Small, Large
+                        "tipo_cliente",      # <-- Mercado Libre, Amazon
                         "status_operacion", 
                         "paquetes_cargados", 
                         "paradas"
                     ]].rename(columns={
                         "hora_llegada_hub": "Hora de Arribo",
-                        "tipo_cliente": "Tipo",
+                        "tipo_cliente": "Cliente",
                         "status_operacion": "Condición",
                         "paquetes_cargados": "Paquetes",
                         "paradas": "Paradas"
@@ -558,4 +563,3 @@ with tab6:
                 
         except Exception as e:
             st.error(f"Error al generar la consulta: {e}")
-
