@@ -62,6 +62,9 @@ with tab1:
             correo = st.text_input("Correo")
         with col2:
             celular = st.text_input("Celular")
+            # --- NUEVOS CAMPOS BANCARIOS ---
+            banco = st.text_input("Nombre Banco")
+            clabe = st.text_input("Clabe Interbancaria")
         
         # Reorganización para equilibrar el espacio visual
         c1, c2, c3 = st.columns(3)
@@ -76,9 +79,9 @@ with tab1:
         with c3:
             f_lic = st.file_uploader("Licencia")
             f_dom = st.file_uploader("Domicilio")
-            f_ban = st.file_uploader("Banco")
+            f_ban = st.file_uploader("Banco (Archivo)") # Aclarado para no confundir con el texto
         
-        # Nueva fila o sección inferior para los restantes si quieres que se vea aún más limpio
+        # Nueva fila o sección inferior para los restantes
         c4, c5, c6 = st.columns(3)
         with c4:
             f_tox = st.file_uploader("Toxicológico")
@@ -97,6 +100,8 @@ with tab1:
                     "rfc": rfc.upper(), 
                     "correo": correo, 
                     "celular": celular,
+                    "nombre_banco": banco,           # <-- Se envía a Supabase
+                    "clabe_interbancaria": clabe,    # <-- Se envía a Supabase
                     "url_fotografia": procesar_archivo(f_foto, "conductores/fotos", rfc),
                     "url_acta_nacimiento": procesar_archivo(f_acta, "conductores/actas", rfc),
                     "url_curp": procesar_archivo(f_curp, "conductores/curps", rfc),
@@ -115,7 +120,6 @@ with tab1:
                     st.success("Conductor registrado exitosamente")
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
-
 # ==========================================
 # PESTAÑA 2: UNIDADES
 # ==========================================
