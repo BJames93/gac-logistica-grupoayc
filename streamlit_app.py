@@ -46,7 +46,7 @@ def procesar_archivo(archivo, carpeta, identificador):
     return None
 
 # --- INTERFAZ ---
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="Grupo AyC",layout="wide")
 st.title("📊 Sistema Centralizado Grupo AyC")
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🚗 Alta de Conductores", "🚛 Control de Unidades", "📋 Registro de Operación","🔍 Consulta Integral","🔄 Actualización de Expedientes","📊 Verificación de Captura"])
 
