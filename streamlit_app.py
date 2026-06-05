@@ -187,6 +187,9 @@ with tab2:
 # ==========================================
 # PESTAÑA 3: REGISTRO DE OPERACIÓN
 # ==========================================
+# ==========================================
+# PESTAÑA 3: REGISTRO DE OPERACIÓN
+# ==========================================
 with tab3:
     st.header("Captura Dinámica de Despacho Operativo")
     st.write("Módulo relacional. Permite enlazar los conductores y unidades activos en sistema.")
@@ -213,13 +216,16 @@ with tab3:
         with st.form("form_operacion", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                # --- NUEVO CAMPO: Tipo de Cliente ---
+                # --- CAMPO: Tipo de Cliente ---
                 tipo_cliente = st.selectbox("Tipo de Cliente *", options=["", "Mercado Libre", "Amazon"])
                 
                 # Opciones con espacio en blanco al inicio [""]
                 sel_conductor = st.selectbox("Seleccione el Conductor asignado *", options=[""] + list(dict_conductores.keys()))
                 sel_unidad = st.selectbox("Seleccione las Placas del Vehículo *", options=[""] + list(dict_unidades.keys()))
                 status_operacion = st.selectbox("Estatus del Servicio", options=["En ruta", "Cancelacion", "No show"])
+                
+                # --- NUEVO CAMPO: Checkbox Ambulancia ---
+                es_ambulancia = st.checkbox("¿Realizó Ambulancia?")
             
             with col2:
                 paquetes = st.number_input("Cantidad de Paquetes Cargados", min_value=0, step=1, value=0)
@@ -247,7 +253,6 @@ with tab3:
             
             # --- LÓGICA DE ENVÍO CON VALIDACIÓN ---
             if enviar_operacion:
-                # Agregamos la validación obligatoria para el nuevo campo
                 if not tipo_cliente or not sel_conductor or not sel_unidad:
                     st.error("Por favor selecciona el Tipo de Cliente, el Conductor y el Vehículo válidos para despachar.")
                 else:
@@ -255,19 +260,20 @@ with tab3:
                     iso_salida = datetime.combine(fecha_salida, hora_salida).isoformat()
                     
                     datos_operacion = {
-                        "tipo_cliente": tipo_cliente, # <-- Se agrega al registro de Supabase
+                        "tipo_cliente": tipo_cliente,
                         "conductor_id": dict_conductores[sel_conductor],
                         "unidad_id": dict_unidades[sel_unidad],
                         "status_operacion": status_operacion,
                         "hora_llegada_hub": iso_llegada,
                         "hora_salida_hub": iso_salida,
                         "paquetes_cargados": int(paquetes),
-                        "paradas": int(paradas)
+                        "paradas": int(paradas),
+                        "ambulancia": es_ambulancia # <-- Nuevo campo booleano
                     }
                     
                     try:
                         supabase.table("registro_operacion").insert(datos_operacion).execute()
-                        st.success(f"¡Viaje de {tipo_cliente} despachado correctamente!")
+                        st.success(f"¡Viaje de {tipo_cliente} despachado correctamente! (Ambulancia: {'Sí' if es_ambulancia else 'No'})")
                     except Exception as e:
                         st.error(f"Error al registrar la operación en base de datos: {e}")
 # ==========================================
