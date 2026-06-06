@@ -561,7 +561,8 @@ with tab6:
                         "tipo_cliente",      # <-- Mercado Libre, Amazon
                         "status_operacion", 
                         "paquetes_cargados", 
-                        "paradas"
+                        "paradas",
+                        "ambulancia"
                     ]].rename(columns={
                         "hora_llegada_hub": "Hora de Arribo",
                         "tipo_cliente": "Cliente",
