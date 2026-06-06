@@ -560,9 +560,9 @@ with tab6:
                         "Tipo Unidad",       # <-- Sedan, Small, Large
                         "tipo_cliente",      # <-- Mercado Libre, Amazon
                         "status_operacion", 
+                        "ambulancia",
                         "paquetes_cargados", 
-                        "paradas",
-                        "ambulancia"
+                        "paradas"
                     ]].rename(columns={
                         "hora_llegada_hub": "Hora de Arribo",
                         "tipo_cliente": "Cliente",
