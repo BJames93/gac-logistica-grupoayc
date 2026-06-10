@@ -506,7 +506,6 @@ with tab6:
         try:
             res_op = supabase.table("registro_operacion").select("*").execute()
             df_op = pd.DataFrame(res_op.data)
-            st.write("Columnas disponibles:", df_op.columns.tolist()) 
 
             if not df_op.empty:
                 cond_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
@@ -562,7 +561,7 @@ with tab6:
                         df_filtrado["Placas"].fillna("Sin placas")
                     )
                     opciones = df_filtrado["_label"].tolist()
-                    ids     = df_filtrado["id"].tolist()   # <-- ajusta "id" al nombre real de tu PK
+                    ids     = df_filtrado["id_operacion"].tolist()   # <-- ajusta "id" al nombre real de tu PK
 
                     seleccion = st.selectbox("Selecciona el registro a modificar:", opciones)
                     idx_sel   = opciones.index(seleccion)
@@ -645,7 +644,7 @@ with tab6:
                                 "paquetes_cargados": nuevos_paquetes,
                                 "paradas":           nuevas_paradas,
                             }
-                            supabase.table("registro_operacion").update(payload).eq("id", id_sel).execute()
+                            supabase.table("registro_operacion").update(payload).eq("id_operacion", id_sel).execute()
                             st.success(f"✅ Registro #{id_sel} actualizado correctamente. Vuelve a buscar para ver los cambios.")
                         except Exception as e:
                             st.error(f"Error al guardar: {e}")
@@ -653,7 +652,7 @@ with tab6:
                     # --- ACCIÓN: ELIMINAR ---
                     if borrar:
                         try:
-                            supabase.table("registro_operacion").delete().eq("id", id_sel).execute()
+                            supabase.table("registro_operacion").delete().eq("id_operacion", id_sel).execute()
                             st.warning(f"🗑️ Registro #{id_sel} eliminado de la base de datos.")
                         except Exception as e:
                             st.error(f"Error al eliminar: {e}")
@@ -665,4 +664,5 @@ with tab6:
 
         except Exception as e:
             st.error(f"Error al generar la consulta: {e}")
+
 
