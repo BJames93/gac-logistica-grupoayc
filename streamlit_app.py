@@ -645,7 +645,7 @@ with tab6:
         # --- ACCIÓN: GUARDAR ---
         if guardar:
             try:
-                nueva_datetime = f"{nueva_fecha}T{nueva_hora}:00"
+                nueva_datetime = datetime.combine(nueva_fecha, nueva_hora).isoformat()
                 payload = {
                     "hora_llegada_hub": nueva_datetime,
                     "conductor_id": nuevo_cond_id,
@@ -670,3 +670,4 @@ with tab6:
                 st.session_state.pop("tab6_df", None)  # ✅ Limpia para forzar nueva búsqueda
             except Exception as e:
                 st.error(f"Error al eliminar: {e}")
+
