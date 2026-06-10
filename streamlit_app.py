@@ -611,10 +611,9 @@ with tab6:
                             cond_status_idx  = condiciones_opts.index(cond_status)
                             nueva_condicion  = st.selectbox("Condición", condiciones_opts, index=cond_status_idx)
 
-                            # AMBULANCIA
-                            ambulancia_opts = ["NO", "SÍ"]
-                            amb_actual      = "SÍ" if str(fila["ambulancia"]).upper() in ["SÍ", "SI", "TRUE", "1"] else "NO"
-                            nueva_ambulancia = st.selectbox("Ambulancia", ambulancia_opts, index=ambulancia_opts.index(amb_actual))
+                           # AMBULANCIA
+                            amb_actual = str(fila["ambulancia"]).upper() in ["SÍ", "SI", "TRUE", "1", "TRUE"]
+                            nueva_ambulancia = st.checkbox("¿Realizó Ambulancia?", value=amb_actual)
 
                         fe3, fe4 = st.columns(2)
                         with fe3:
@@ -634,16 +633,16 @@ with tab6:
                     if guardar:
                         try:
                             nueva_datetime = f"{nueva_fecha}T{nueva_hora}:00"
-                            payload = {
-                                "hora_llegada_hub":  nueva_datetime,
-                                "conductor_id":      nuevo_cond_id,
-                                "unidad_id":         nueva_unid_id,
-                                "tipo_cliente":      nuevo_cliente,
-                                "status_operacion":  nueva_condicion,
-                                "ambulancia":        nueva_ambulancia,
-                                "paquetes_cargados": nuevos_paquetes,
-                                "paradas":           nuevas_paradas,
-                            }
+                           payload = {
+                            "hora_llegada_hub":  nueva_datetime,
+                            "conductor_id":      nuevo_cond_id,
+                            "unidad_id":         nueva_unid_id,
+                            "tipo_cliente":      nuevo_cliente,
+                            "status_operacion":  nueva_condicion,
+                            "ambulancia":        nueva_ambulancia,  # ✅ Ya es True/False directo del checkbox
+                            "paquetes_cargados": nuevos_paquetes,
+                            "paradas":           nuevas_paradas,
+                        }
                             supabase.table("registro_operacion").update(payload).eq("id_operacion", id_sel).execute()
                             st.success(f"✅ Registro #{id_sel} actualizado correctamente. Vuelve a buscar para ver los cambios.")
                         except Exception as e:
@@ -664,6 +663,7 @@ with tab6:
 
         except Exception as e:
             st.error(f"Error al generar la consulta: {e}")
+
 
 
 
