@@ -526,131 +526,147 @@ with tab6:
                 if not df_filtrado.empty:
                     df_filtrado["hora_llegada_hub"] = df_filtrado["hora_llegada_hub"].dt.strftime('%Y-%m-%d %H:%M')
 
-                    st.write("---")
-                    m1, m2, m3 = st.columns(3)
-                    m1.metric("Total de Viajes", len(df_filtrado))
-                    m2.metric("Paquetes Procesados", int(df_filtrado["paquetes_cargados"].sum()))
-                    m3.metric("Paradas Planificadas", int(df_filtrado["paradas"].sum()))
-                    st.write("---")
-
-                    df_mostrar = df_filtrado[[
-                        "hora_llegada_hub", "Conductor", "Placas", "Tipo Unidad",
-                        "tipo_cliente", "status_operacion", "ambulancia",
-                        "paquetes_cargados", "paradas"
-                    ]].rename(columns={
-                        "hora_llegada_hub": "Hora de Arribo",
-                        "tipo_cliente": "Cliente",
-                        "status_operacion": "Condición",
-                        "paquetes_cargados": "Paquetes",
-                        "paradas": "Paradas"
-                    })
-
-                    st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
-
-                    # -------------------------------------------------------
-                    # SECCIÓN DE MODIFICACIÓN / ELIMINACIÓN DE REGISTROS
-                    # -------------------------------------------------------
-                    st.write("---")
-                    st.subheader("✏️ Modificar o Eliminar un Registro")
-                    st.caption("Selecciona un registro de la lista para editarlo o eliminarlo.")
-
-                    df_filtrado["_label"] = (
-                        df_filtrado["hora_llegada_hub"].astype(str) + " | " +
-                        df_filtrado["Conductor"].fillna("Sin conductor") + " | " +
-                        df_filtrado["Placas"].fillna("Sin placas")
-                    )
-                    opciones = df_filtrado["_label"].tolist()
-                    ids = df_filtrado["id_operacion"].tolist()
-
-                    seleccion = st.selectbox("Selecciona el registro a modificar:", opciones)
-                    idx_sel = opciones.index(seleccion)
-                    id_sel = ids[idx_sel]
-                    fila = df_filtrado.iloc[idx_sel]
-
-                    # --- FORMULARIO DE EDICIÓN ---
-                    with st.form("form_edicion"):
-                        st.markdown("**Datos editables del registro seleccionado:**")
-
-                        fe1, fe2 = st.columns(2)
-                        with fe1:
-                            hora_actual = pd.to_datetime(fila["hora_llegada_hub"])
-                            nueva_fecha = st.date_input("Fecha de Arribo", value=hora_actual.date())
-                            nueva_hora = st.time_input("Hora de Arribo", value=hora_actual.time())
-
-                            nombres_cond = list(map_cond.values())
-                            ids_cond = list(map_cond.keys())
-                            cond_actual = map_cond.get(fila["conductor_id"], nombres_cond[0])
-                            cond_idx = nombres_cond.index(cond_actual) if cond_actual in nombres_cond else 0
-                            nuevo_cond = st.selectbox("Conductor", nombres_cond, index=cond_idx)
-                            nuevo_cond_id = ids_cond[nombres_cond.index(nuevo_cond)]
-
-                            placas_list = list(map_unid.values())
-                            ids_unid = list(map_unid.keys())
-                            placa_actual = map_unid.get(fila["unidad_id"], placas_list[0])
-                            unid_idx = placas_list.index(placa_actual) if placa_actual in placas_list else 0
-                            nueva_placa = st.selectbox("Placas / Unidad", placas_list, index=unid_idx)
-                            nueva_unid_id = ids_unid[placas_list.index(nueva_placa)]
-
-                        with fe2:
-                            st.text_input("Tipo de Unidad (automático)", value=map_tipo_unid.get(nueva_unid_id, "N/A"), disabled=True)
-
-                            clientes_opts = ["Mercado Libre", "Amazon"]
-                            cli_actual = fila["tipo_cliente"] if fila["tipo_cliente"] in clientes_opts else clientes_opts[0]
-                            cli_idx = clientes_opts.index(cli_actual)
-                            nuevo_cliente = st.selectbox("Cliente", clientes_opts, index=cli_idx)
-
-                            condiciones_opts = ["En ruta", "Cancelacion", "No show"]
-                            cond_status = fila["status_operacion"] if fila["status_operacion"] in condiciones_opts else condiciones_opts[0]
-                            cond_status_idx = condiciones_opts.index(cond_status)
-                            nueva_condicion = st.selectbox("Condición", condiciones_opts, index=cond_status_idx)
-
-                            amb_actual = str(fila["ambulancia"]).upper() in ["SÍ", "SI", "TRUE", "1"]
-                            nueva_ambulancia = st.checkbox("¿Realizó Ambulancia?", value=amb_actual)
-
-                        fe3, fe4 = st.columns(2)
-                        with fe3:
-                            nuevos_paquetes = st.number_input("Paquetes", min_value=0, value=int(fila["paquetes_cargados"]))
-                        with fe4:
-                            nuevas_paradas = st.number_input("Paradas", min_value=0, value=int(fila["paradas"]))
-
-                        st.write("")
-                        col_guardar, col_borrar = st.columns([3, 1])
-                        with col_guardar:
-                            guardar = st.form_submit_button("💾 Guardar Cambios", use_container_width=True)
-                        with col_borrar:
-                            borrar = st.form_submit_button("🗑️ Eliminar Registro", use_container_width=True, type="secondary")
-
-                    # --- ACCIÓN: GUARDAR ---
-                    if guardar:
-                        try:
-                            nueva_datetime = f"{nueva_fecha}T{nueva_hora}:00"
-                            payload = {
-                                "hora_llegada_hub": nueva_datetime,
-                                "conductor_id": nuevo_cond_id,
-                                "unidad_id": nueva_unid_id,
-                                "tipo_cliente": nuevo_cliente,
-                                "status_operacion": nueva_condicion,
-                                "ambulancia": nueva_ambulancia,
-                                "paquetes_cargados": nuevos_paquetes,
-                                "paradas": nuevas_paradas,
-                            }
-                            supabase.table("registro_operacion").update(payload).eq("id_operacion", id_sel).execute()
-                            st.success(f"✅ Registro #{id_sel} actualizado correctamente. Vuelve a buscar para ver los cambios.")
-                        except Exception as e:
-                            st.error(f"Error al guardar: {e}")
-
-                    # --- ACCIÓN: ELIMINAR ---
-                    if borrar:
-                        try:
-                            supabase.table("registro_operacion").delete().eq("id_operacion", id_sel).execute()
-                            st.warning(f"🗑️ Registro #{id_sel} eliminado de la base de datos.")
-                        except Exception as e:
-                            st.error(f"Error al eliminar: {e}")
-
+                    # ✅ GUARDAMOS TODO EN SESSION STATE
+                    st.session_state["tab6_df"] = df_filtrado
+                    st.session_state["tab6_map_cond"] = map_cond
+                    st.session_state["tab6_map_unid"] = map_unid
+                    st.session_state["tab6_map_tipo"] = map_tipo_unid
                 else:
                     st.warning(f"No se encontraron capturas registradas entre {fecha_inicio} y {fecha_fin}.")
+                    st.session_state.pop("tab6_df", None)
             else:
                 st.info("Aún no hay registros de operaciones en la base de datos.")
+                st.session_state.pop("tab6_df", None)
 
         except Exception as e:
             st.error(f"Error al generar la consulta: {e}")
+
+    # ✅ TODO LO QUE SIGUE VIVE FUERA DEL BOTÓN, PERSISTE ENTRE RE-EJECUCIONES
+    if "tab6_df" in st.session_state:
+        df_filtrado   = st.session_state["tab6_df"]
+        map_cond      = st.session_state["tab6_map_cond"]
+        map_unid      = st.session_state["tab6_map_unid"]
+        map_tipo_unid = st.session_state["tab6_map_tipo"]
+
+        st.write("---")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total de Viajes", len(df_filtrado))
+        m2.metric("Paquetes Procesados", int(df_filtrado["paquetes_cargados"].sum()))
+        m3.metric("Paradas Planificadas", int(df_filtrado["paradas"].sum()))
+        st.write("---")
+
+        df_mostrar = df_filtrado[[
+            "hora_llegada_hub", "Conductor", "Placas", "Tipo Unidad",
+            "tipo_cliente", "status_operacion", "ambulancia",
+            "paquetes_cargados", "paradas"
+        ]].rename(columns={
+            "hora_llegada_hub": "Hora de Arribo",
+            "tipo_cliente": "Cliente",
+            "status_operacion": "Condición",
+            "paquetes_cargados": "Paquetes",
+            "paradas": "Paradas"
+        })
+
+        st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+
+        # -------------------------------------------------------
+        # SECCIÓN DE MODIFICACIÓN / ELIMINACIÓN DE REGISTROS
+        # -------------------------------------------------------
+        st.write("---")
+        st.subheader("✏️ Modificar o Eliminar un Registro")
+        st.caption("Selecciona un registro de la lista para editarlo o eliminarlo.")
+
+        df_filtrado["_label"] = (
+            df_filtrado["hora_llegada_hub"].astype(str) + " | " +
+            df_filtrado["Conductor"].fillna("Sin conductor") + " | " +
+            df_filtrado["Placas"].fillna("Sin placas")
+        )
+        opciones = df_filtrado["_label"].tolist()
+        ids = df_filtrado["id_operacion"].tolist()
+
+        seleccion = st.selectbox("Selecciona el registro a modificar:", opciones)
+        idx_sel = opciones.index(seleccion)
+        id_sel = ids[idx_sel]
+        fila = df_filtrado.iloc[idx_sel]
+
+        # --- FORMULARIO DE EDICIÓN ---
+        with st.form("form_edicion"):
+            st.markdown("**Datos editables del registro seleccionado:**")
+
+            fe1, fe2 = st.columns(2)
+            with fe1:
+                hora_actual = pd.to_datetime(fila["hora_llegada_hub"])
+                nueva_fecha = st.date_input("Fecha de Arribo", value=hora_actual.date())
+                nueva_hora = st.time_input("Hora de Arribo", value=hora_actual.time())
+
+                nombres_cond = list(map_cond.values())
+                ids_cond = list(map_cond.keys())
+                cond_actual = map_cond.get(fila["conductor_id"], nombres_cond[0])
+                cond_idx = nombres_cond.index(cond_actual) if cond_actual in nombres_cond else 0
+                nuevo_cond = st.selectbox("Conductor", nombres_cond, index=cond_idx)
+                nuevo_cond_id = ids_cond[nombres_cond.index(nuevo_cond)]
+
+                placas_list = list(map_unid.values())
+                ids_unid = list(map_unid.keys())
+                placa_actual = map_unid.get(fila["unidad_id"], placas_list[0])
+                unid_idx = placas_list.index(placa_actual) if placa_actual in placas_list else 0
+                nueva_placa = st.selectbox("Placas / Unidad", placas_list, index=unid_idx)
+                nueva_unid_id = ids_unid[placas_list.index(nueva_placa)]
+
+            with fe2:
+                st.text_input("Tipo de Unidad (automático)", value=map_tipo_unid.get(nueva_unid_id, "N/A"), disabled=True)
+
+                clientes_opts = ["Mercado Libre", "Amazon"]
+                cli_actual = fila["tipo_cliente"] if fila["tipo_cliente"] in clientes_opts else clientes_opts[0]
+                cli_idx = clientes_opts.index(cli_actual)
+                nuevo_cliente = st.selectbox("Cliente", clientes_opts, index=cli_idx)
+
+                condiciones_opts = ["En ruta", "Cancelacion", "No show"]
+                cond_status = fila["status_operacion"] if fila["status_operacion"] in condiciones_opts else condiciones_opts[0]
+                cond_status_idx = condiciones_opts.index(cond_status)
+                nueva_condicion = st.selectbox("Condición", condiciones_opts, index=cond_status_idx)
+
+                amb_actual = str(fila["ambulancia"]).upper() in ["SÍ", "SI", "TRUE", "1"]
+                nueva_ambulancia = st.checkbox("¿Realizó Ambulancia?", value=amb_actual)
+
+            fe3, fe4 = st.columns(2)
+            with fe3:
+                nuevos_paquetes = st.number_input("Paquetes", min_value=0, value=int(fila["paquetes_cargados"]))
+            with fe4:
+                nuevas_paradas = st.number_input("Paradas", min_value=0, value=int(fila["paradas"]))
+
+            st.write("")
+            col_guardar, col_borrar = st.columns([3, 1])
+            with col_guardar:
+                guardar = st.form_submit_button("💾 Guardar Cambios", use_container_width=True)
+            with col_borrar:
+                borrar = st.form_submit_button("🗑️ Eliminar Registro", use_container_width=True, type="secondary")
+
+        # --- ACCIÓN: GUARDAR ---
+        if guardar:
+            try:
+                nueva_datetime = f"{nueva_fecha}T{nueva_hora}:00"
+                payload = {
+                    "hora_llegada_hub": nueva_datetime,
+                    "conductor_id": nuevo_cond_id,
+                    "unidad_id": nueva_unid_id,
+                    "tipo_cliente": nuevo_cliente,
+                    "status_operacion": nueva_condicion,
+                    "ambulancia": nueva_ambulancia,
+                    "paquetes_cargados": nuevos_paquetes,
+                    "paradas": nuevas_paradas,
+                }
+                supabase.table("registro_operacion").update(payload).eq("id_operacion", id_sel).execute()
+                st.success(f"✅ Registro #{id_sel} actualizado correctamente. Vuelve a buscar para ver los cambios.")
+                st.session_state.pop("tab6_df", None)  # ✅ Limpia para forzar nueva búsqueda
+            except Exception as e:
+                st.error(f"Error al guardar: {e}")
+
+        # --- ACCIÓN: ELIMINAR ---
+        if borrar:
+            try:
+                supabase.table("registro_operacion").delete().eq("id_operacion", id_sel).execute()
+                st.warning(f"🗑️ Registro #{id_sel} eliminado de la base de datos.")
+                st.session_state.pop("tab6_df", None)  # ✅ Limpia para forzar nueva búsqueda
+            except Exception as e:
+                st.error(f"Error al eliminar: {e}")
