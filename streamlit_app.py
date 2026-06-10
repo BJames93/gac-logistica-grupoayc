@@ -600,13 +600,13 @@ with tab6:
                             st.text_input("Tipo de Unidad (automático)", value=map_tipo_unid.get(nueva_unid_id, "N/A"), disabled=True)
 
                             # CLIENTE
-                            clientes_opts = ["Mercado Libre", "Amazon", "DHL", "FedEx", "Otro"]
+                            clientes_opts = ["Mercado Libre", "Amazon"]
                             cli_actual    = fila["tipo_cliente"] if fila["tipo_cliente"] in clientes_opts else "Otro"
                             cli_idx       = clientes_opts.index(cli_actual)
                             nuevo_cliente = st.selectbox("Cliente", clientes_opts, index=cli_idx)
 
                             # CONDICIÓN
-                            condiciones_opts = ["NORMAL", "INCOMPLETO", "CANCELADO"]
+                            condiciones_opts = ["En Ruta", "Cancelacion", "No Show"]
                             cond_status      = fila["status_operacion"] if fila["status_operacion"] in condiciones_opts else "NORMAL"
                             cond_status_idx  = condiciones_opts.index(cond_status)
                             nueva_condicion  = st.selectbox("Condición", condiciones_opts, index=cond_status_idx)
@@ -664,5 +664,6 @@ with tab6:
 
         except Exception as e:
             st.error(f"Error al generar la consulta: {e}")
+
 
 
