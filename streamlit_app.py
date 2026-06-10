@@ -498,8 +498,8 @@ with tab5:
 # NUEVA PESTAÑA 6: VERIFICACION DE CAPTURA
 # ===============================================
 with tab6:
-    st.header("📊 Verificación de Captura")
-    st.write("Consulta y verifica los despachos operativos registrados en el sistema.")
+    st.header("📊 Verificación de Captura y Edición")
+    st.write("Consulta, verifica, modifica o elimina los despachos operativos registrados en el sistema.")
     
     # --- FILTROS DE FECHA ---
     c_ini, c_fin = st.columns(2)
@@ -510,38 +510,36 @@ with tab6:
         
     if st.button("Buscar Capturas"):
         try:
-            # 1. Extraemos toda la base de operaciones
+            # 1. Extraemos toda la base de operaciones (Sin filtro de usuario)
             res_op = supabase.table("registro_operacion").select("*").execute()
             df_op = pd.DataFrame(res_op.data)
             
             if not df_op.empty:
-                # 2. Extraemos diccionarios para traducir IDs a Nombres reales y tipos
+                # 2. Extraemos diccionarios para traducir IDs a Nombres reales (Sin filtro de usuario)
                 cond_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
-                # Añadimos 'tipo_unidad' a la consulta de unidades
                 unid_db = supabase.table("unidades").select("id_unidad, placas, tipo_unidad").execute().data
                 
                 # Creamos los mapas de traducción
                 map_cond = {c["id_conductor"]: c["nombre_driver"] for c in cond_db}
                 map_unid = {u["id_unidad"]: u["placas"] for u in unid_db}
-                # Nuevo mapa para extraer el tipo de unidad
                 map_tipo_unid = {u["id_unidad"]: u.get("tipo_unidad", "N/A") for u in unid_db}
                 
                 # Aplicamos la traducción al DataFrame
                 df_op["Conductor"] = df_op["conductor_id"].map(map_cond)
                 df_op["Placas"] = df_op["unidad_id"].map(map_unid)
-                df_op["Tipo Unidad"] = df_op["unidad_id"].map(map_tipo_unid) # <-- Agregamos el tipo de vehículo
+                df_op["Tipo Unidad"] = df_op["unidad_id"].map(map_tipo_unid) 
                 
                 # 3. Procesamiento y filtro de fechas
-                # Convertimos el texto ISO a formato fecha/hora de pandas
-                df_op["hora_llegada_hub"] = pd.to_datetime(df_op["hora_llegada_hub"]).dt.tz_localize(None)
+                # Mantenemos una columna 'raw' para no perder el formato DateTime real
+                df_op["hora_llegada_hub_raw"] = pd.to_datetime(df_op["hora_llegada_hub"]).dt.tz_localize(None)
                 
                 # Filtramos por el rango seleccionado
-                mascara = (df_op["hora_llegada_hub"].dt.date >= fecha_inicio) & (df_op["hora_llegada_hub"].dt.date <= fecha_fin)
+                mascara = (df_op["hora_llegada_hub_raw"].dt.date >= fecha_inicio) & (df_op["hora_llegada_hub_raw"].dt.date <= fecha_fin)
                 df_filtrado = df_op.loc[mascara].copy()
                 
                 if not df_filtrado.empty:
                     # Formateamos la hora para que se vea limpia en la tabla
-                    df_filtrado["hora_llegada_hub"] = df_filtrado["hora_llegada_hub"].dt.strftime('%Y-%m-%d %H:%M')
+                    df_filtrado["hora_llegada_hub_str"] = df_filtrado["hora_llegada_hub_raw"].dt.strftime('%Y-%m-%d %H:%M')
                     
                     # --- PEQUEÑO DASHBOARD (MÉTRICAS) ---
                     st.write("---")
@@ -552,19 +550,19 @@ with tab6:
                     st.write("---")
                     
                     # --- TABLA DE VERIFICACIÓN ---
-                    # Seleccionamos y renombramos las columnas incluyendo el nuevo campo
                     df_mostrar = df_filtrado[[
-                        "hora_llegada_hub", 
+                        "id", # Agregamos el ID para tener el identificador único
+                        "hora_llegada_hub_str", 
                         "Conductor", 
                         "Placas", 
-                        "Tipo Unidad",       # <-- Sedan, Small, Large
-                        "tipo_cliente",      # <-- Mercado Libre, Amazon
+                        "Tipo Unidad",       
+                        "tipo_cliente",      
                         "status_operacion", 
                         "ambulancia",
                         "paquetes_cargados", 
                         "paradas"
                     ]].rename(columns={
-                        "hora_llegada_hub": "Hora de Arribo",
+                        "hora_llegada_hub_str": "Hora de Arribo",
                         "tipo_cliente": "Cliente",
                         "status_operacion": "Condición",
                         "paquetes_cargados": "Paquetes",
@@ -573,6 +571,109 @@ with tab6:
                     
                     # Mostramos la tabla interactiva
                     st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+                    
+                    # ========================================================
+                    # NUEVA SECCIÓN: MODIFICACIÓN Y ELIMINACIÓN DE REGISTROS
+                    # ========================================================
+                    st.divider()
+                    st.subheader("🛠️ Gestión de Registros (Modificar o Eliminar)")
+                    
+                    if "id" in df_filtrado.columns:
+                        # Creamos opciones descriptivas para el selector
+                        opciones_editar = df_filtrado.apply(
+                            lambda x: f"ID: {x['id']} | {x['hora_llegada_hub_str']} | {x['Conductor']} | {x['Placas']}",
+                            axis=1
+                        ).tolist()
+                        
+                        registro_seleccionado = st.selectbox("Selecciona un viaje de la lista para gestionar:", [""] + opciones_editar)
+                        
+                        if registro_seleccionado:
+                            # Extraemos el ID numérico que viaja al principio del string
+                            id_registro = int(registro_seleccionado.split(" | ")[0].replace("ID: ", ""))
+                            
+                            # Aislamos los datos actuales de este registro específico
+                            row_data = df_filtrado[df_filtrado["id"] == id_registro].iloc[0]
+                            
+                            # Diccionarios inversos (De Nombre a ID) necesarios para guardar en BD
+                            dict_cond_inv = {v: k for k, v in map_cond.items()}
+                            dict_unid_inv = {v: k for k, v in map_unid.items()}
+                            
+                            with st.form("form_edicion"):
+                                st.write("**📝 Formulario de Actualización**")
+                                
+                                c_ed1, c_ed2 = st.columns(2)
+                                with c_ed1:
+                                    # Cliente
+                                    cli_actual = row_data.get("tipo_cliente", "")
+                                    idx_cli = ["Mercado Libre", "Amazon", ""].index(cli_actual) if cli_actual in ["Mercado Libre", "Amazon", ""] else 0
+                                    nuevo_cliente = st.selectbox("Cliente", ["Mercado Libre", "Amazon", ""], index=idx_cli)
+                                    
+                                    # Conductor
+                                    cond_actual = row_data["Conductor"]
+                                    idx_cond = list(dict_cond_inv.keys()).index(cond_actual) if cond_actual in dict_cond_inv else 0
+                                    nuevo_cond = st.selectbox("Conductor", list(dict_cond_inv.keys()), index=idx_cond)
+                                    
+                                    # Unidad
+                                    unid_actual = row_data["Placas"]
+                                    idx_unid = list(dict_unid_inv.keys()).index(unid_actual) if unid_actual in dict_unid_inv else 0
+                                    nueva_unidad = st.selectbox("Vehículo (Placas)", list(dict_unid_inv.keys()), index=idx_unid)
+                                
+                                with c_ed2:
+                                    # Status
+                                    stat_actual = row_data.get("status_operacion", "En ruta")
+                                    idx_stat = ["En ruta", "Cancelacion", "No show"].index(stat_actual) if stat_actual in ["En ruta", "Cancelacion", "No show"] else 0
+                                    nuevo_status = st.selectbox("Condición", ["En ruta", "Cancelacion", "No show"], index=idx_stat)
+                                    
+                                    # Paquetes y Paradas
+                                    nuevos_paquetes = st.number_input("Paquetes", min_value=0, step=1, value=int(row_data.get("paquetes_cargados", 0)))
+                                    nuevas_paradas = st.number_input("Paradas", min_value=0, step=1, value=int(row_data.get("paradas", 0)))
+                                
+                                # Ambulancia
+                                es_amb = True if row_data.get("ambulancia") == True else False
+                                nueva_ambulancia = st.checkbox("El servicio es Ambulancia", value=es_amb)
+                                
+                                st.write("⏱️ Ajuste de Horario de Arribo")
+                                raw_dt = row_data["hora_llegada_hub_raw"]
+                                t1, t2 = st.columns(2)
+                                with t1:
+                                    nueva_fecha = st.date_input("Nueva Fecha", value=raw_dt.date())
+                                with t2:
+                                    nueva_hora = st.time_input("Nueva Hora", value=raw_dt.time())
+                                
+                                st.divider()
+                                btn_col1, btn_col2 = st.columns(2)
+                                with btn_col1:
+                                    btn_actualizar = st.form_submit_button("💾 Guardar Cambios")
+                                with btn_col2:
+                                    btn_eliminar = st.form_submit_button("❌ Eliminar Registro Completo")
+                                    
+                            # Acciones de los botones
+                            if btn_actualizar:
+                                iso_llegada_nueva = datetime.combine(nueva_fecha, nueva_hora).isoformat()
+                                datos_actualizados = {
+                                    "tipo_cliente": nuevo_cliente,
+                                    "conductor_id": dict_cond_inv[nuevo_cond],
+                                    "unidad_id": dict_unid_inv[nueva_unidad],
+                                    "status_operacion": nuevo_status,
+                                    "ambulancia": nueva_ambulancia,
+                                    "paquetes_cargados": nuevos_paquetes,
+                                    "paradas": nuevas_paradas,
+                                    "hora_llegada_hub": iso_llegada_nueva
+                                }
+                                try:
+                                    supabase.table("registro_operacion").update(datos_actualizados).eq("id", id_registro).execute()
+                                    st.success("✅ ¡Registro actualizado! Por favor, haz clic nuevamente en el botón 'Buscar Capturas' de arriba para refrescar la tabla.")
+                                except Exception as e:
+                                    st.error(f"Error al actualizar: {e}")
+                                    
+                            if btn_eliminar:
+                                try:
+                                    supabase.table("registro_operacion").delete().eq("id", id_registro).execute()
+                                    st.warning("🗑️ ¡Registro eliminado definitivamente! Por favor, haz clic en el botón 'Buscar Capturas' de arriba para refrescar la tabla.")
+                                except Exception as e:
+                                    st.error(f"Error al eliminar: {e}")
+                    else:
+                        st.error("No se detectó una columna 'id' en la tabla. Verifica que la tabla en Supabase tenga un ID configurado como Primary Key.")
                     
                 else:
                     st.warning(f"No se encontraron capturas registradas entre {fecha_inicio} y {fecha_fin}.")
