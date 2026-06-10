@@ -53,9 +53,6 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🚗 Alta de Conductores", "🚛 
 # ==========================================
 # PESTAÑA 1: ALTA DE CONDUCTOR
 # ==========================================
-# ==========================================
-# PESTAÑA 1: ALTA DE CONDUCTOR
-# ==========================================
 with tab1:
     with st.form("form_conductor", clear_on_submit=True):
         
@@ -184,9 +181,6 @@ with tab2:
                 except Exception as e:
                     st.error(f"Error al registrar la unidad: {e}")
 
-# ==========================================
-# PESTAÑA 3: REGISTRO DE OPERACIÓN
-# ==========================================
 # ==========================================
 # PESTAÑA 3: REGISTRO DE OPERACIÓN
 # ==========================================
@@ -512,6 +506,7 @@ with tab6:
         try:
             res_op = supabase.table("registro_operacion").select("*").execute()
             df_op = pd.DataFrame(res_op.data)
+            st.write("Columnas disponibles:", df_op.columns.tolist()) 
 
             if not df_op.empty:
                 cond_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
@@ -670,3 +665,4 @@ with tab6:
 
         except Exception as e:
             st.error(f"Error al generar la consulta: {e}")
+
