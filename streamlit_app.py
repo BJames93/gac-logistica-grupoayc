@@ -207,6 +207,9 @@ with tab3:
     if not dict_conductores or not dict_unidades:
         st.warning("⚠️ Atención: Debes tener conductores y unidades registrados para operar.")
     else:
+        # =======================================================
+        # MÓDULO 1: REGISTRO DE OPERACIÓN (DESPACHO)
+        # =======================================================
         with st.form("form_operacion", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
@@ -273,6 +276,47 @@ with tab3:
                         st.success(f"¡Viaje de {tipo_cliente} despachado correctamente! (Ambulancia: {'Sí' if es_ambulancia else 'No'} | Costal: {'Sí' if es_costal else 'No'})")
                     except Exception as e:
                         st.error(f"Error al registrar la operación en base de datos: {e}")
+
+        # =======================================================
+        # MÓDULO 2: REGISTRO DE DEVOLUCIONES
+        # =======================================================
+        st.write("---")
+        st.subheader("📦 Registro de Devoluciones")
+        st.write("Captura de paquetes retornados asociando la operación a un conductor y unidad.")
+
+        with st.form("form_devoluciones", clear_on_submit=True):
+            col_dev1, col_dev2 = st.columns(2)
+            
+            with col_dev1:
+                dev_cliente = st.selectbox("Tipo de Cliente (Devolución) *", options=["", "Mercado Libre", "Amazon"])
+                # Agregamos 'key' únicas para no generar conflictos con los selectbox del formulario de arriba
+                dev_conductor = st.selectbox("Conductor asignado *", options=[""] + list(dict_conductores.keys()), key="dev_cond")
+                dev_unidad = st.selectbox("Placas del Vehículo *", options=[""] + list(dict_unidades.keys()), key="dev_unid")
+            
+            with col_dev2:
+                dev_paquetes = st.number_input("Cantidad de Paquetes Devueltos *", min_value=1, step=1, value=1)
+            
+            enviar_devolucion = st.form_submit_button("Registrar Devolución")
+            
+            if enviar_devolucion:
+                if not dev_cliente or not dev_conductor or not dev_unidad:
+                    st.error("⚠️ Por favor selecciona el Cliente, Conductor y Placas para registrar la devolución.")
+                else:
+                    # Preparamos los datos para la NUEVA tabla
+                    datos_devolucion = {
+                        "tipo_cliente": dev_cliente,
+                        "conductor_id": dict_conductores[dev_conductor],
+                        "unidad_id": dict_unidades[dev_unidad],
+                        "paquetes_devueltos": int(dev_paquetes)
+                        # "creado_por": usuario_id_activo  # Descomenta esto si también llevas control de quién lo capturó
+                    }
+                    
+                    try:
+                        # Hacemos el insert apuntando a la tabla 'devoluciones'
+                        supabase.table("devoluciones").insert(datos_devolucion).execute()
+                        st.success(f"✅ ¡Devolución de {dev_paquetes} paquete(s) de {dev_cliente} registrada correctamente!")
+                    except Exception as e:
+                        st.error(f"Error al registrar la devolución en la base de datos: {e}")
 # ==========================================
 # NUEVA PESTAÑA 4: CONSULTA DE EXPEDIENTES
 # ==========================================
@@ -684,3 +728,4 @@ with tab6:
                 st.session_state.pop("tab6_df", None)  # ✅ Limpia para forzar nueva búsqueda
             except Exception as e:
                 st.error(f"Error al eliminar: {e}")
+
