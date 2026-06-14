@@ -272,7 +272,6 @@ with tab3:
                     
                     try:
                         supabase.table("registro_operacion").insert(datos_operacion).execute()
-                        # Se actualiza el mensaje de éxito para incluir ambas validaciones si lo deseas
                         st.success(f"¡Viaje de {tipo_cliente} despachado correctamente! (Ambulancia: {'Sí' if es_ambulancia else 'No'} | Costal: {'Sí' if es_costal else 'No'})")
                     except Exception as e:
                         st.error(f"Error al registrar la operación en base de datos: {e}")
@@ -294,6 +293,8 @@ with tab3:
                 dev_unidad = st.selectbox("Placas del Vehículo *", options=[""] + list(dict_unidades.keys()), key="dev_unid")
             
             with col_dev2:
+                # --- NUEVO CAMPO: FECHA DE DEVOLUCIÓN ---
+                dev_fecha = st.date_input("Fecha de Devolución *")
                 dev_paquetes = st.number_input("Cantidad de Paquetes Devueltos *", min_value=1, step=1, value=1)
             
             enviar_devolucion = st.form_submit_button("Registrar Devolución")
@@ -304,6 +305,7 @@ with tab3:
                 else:
                     # Preparamos los datos para la NUEVA tabla
                     datos_devolucion = {
+                        "fecha_devolucion": dev_fecha.isoformat(), # Convertimos la fecha a formato ISO
                         "tipo_cliente": dev_cliente,
                         "conductor_id": dict_conductores[dev_conductor],
                         "unidad_id": dict_unidades[dev_unidad],
@@ -314,7 +316,7 @@ with tab3:
                     try:
                         # Hacemos el insert apuntando a la tabla 'devoluciones'
                         supabase.table("devoluciones").insert(datos_devolucion).execute()
-                        st.success(f"✅ ¡Devolución de {dev_paquetes} paquete(s) de {dev_cliente} registrada correctamente!")
+                        st.success(f"✅ ¡Devolución de {dev_paquetes} paquete(s) de {dev_cliente} registrada correctamente para la fecha {dev_fecha}!")
                     except Exception as e:
                         st.error(f"Error al registrar la devolución en la base de datos: {e}")
 # ==========================================
@@ -728,4 +730,5 @@ with tab6:
                 st.session_state.pop("tab6_df", None)  # ✅ Limpia para forzar nueva búsqueda
             except Exception as e:
                 st.error(f"Error al eliminar: {e}")
+
 
