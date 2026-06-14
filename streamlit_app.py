@@ -582,6 +582,26 @@ with tab6:
                     df_op["Placas"] = df_op["unidad_id"].map(map_unid)
                     df_op["Tipo Unidad"] = df_op["unidad_id"].map(map_tipo_unid)
                     df_op["hora_llegada_hub_raw"] = pd.to_datetime(df_op["hora_llegada_hub"]).dt.tz_localize(None)
+                    
+                    # Creamos una fecha corta para hacer el match exacto con devoluciones
+                    df_op["fecha_match"] = df_op["hora_llegada_hub_raw"].dt.date
+
+                    # --- CRUCE DE DEVOLUCIONES EN TIEMPO REAL ---
+                    res_dev = supabase.table("devoluciones").select("fecha_devolucion, conductor_id, unidad_id, paquetes_devueltos").execute()
+                    df_dev = pd.DataFrame(res_dev.data)
+                    
+                    if not df_dev.empty:
+                        df_dev["fecha_match"] = pd.to_datetime(df_dev["fecha_devolucion"]).dt.date
+                        # Agrupamos por si registraron múltiples devoluciones el mismo día para la misma unidad
+                        df_dev_agg = df_dev.groupby(["fecha_match", "conductor_id", "unidad_id"])["paquetes_devueltos"].sum().reset_index()
+                        
+                        # Pegamos las devoluciones al df original
+                        df_op = pd.merge(df_op, df_dev_agg, on=["fecha_match", "conductor_id", "unidad_id"], how="left")
+                    else:
+                        df_op["paquetes_devueltos"] = 0
+                        
+                    # Llenamos los nulos (viajes sin devoluciones) con 0
+                    df_op["paquetes_devueltos"] = df_op["paquetes_devueltos"].fillna(0).astype(int)
 
                     mascara = (df_op["hora_llegada_hub_raw"].dt.date >= fecha_inicio) & (df_op["hora_llegada_hub_raw"].dt.date <= fecha_fin)
                     df_filtrado = df_op.loc[mascara].copy()
@@ -643,19 +663,43 @@ with tab6:
             m3.metric("Paradas Planificadas", int(df_filtrado["paradas"].sum()))
             st.write("---")
 
+            # Construcción de las columnas a mostrar
             columnas_mostrar = ["hora_llegada_hub_str", "Conductor", "Placas", "Tipo Unidad", "tipo_cliente", "status_operacion", "ambulancia"]
             if "costal" in df_filtrado.columns:
                 columnas_mostrar.append("costal")
-            columnas_mostrar.extend(["paquetes_cargados", "paradas"])
+            
+            # Incorporamos los paquetes devueltos obtenidos del cruce
+            columnas_mostrar.extend(["paquetes_cargados", "paquetes_devueltos", "paradas"])
 
             df_mostrar = df_filtrado[columnas_mostrar].rename(columns={
                 "hora_llegada_hub_str": "Hora de Arribo",
                 "tipo_cliente": "Cliente",
                 "status_operacion": "Condición",
                 "paquetes_cargados": "Paquetes",
+                "paquetes_devueltos": "Devoluciones",
                 "paradas": "Paradas"
             })
-            st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+
+            # --- CÁLCULO DE PERFORMANCE EN VIVO (NO SE GUARDA EN BD) ---
+            # (Paquetes - Devoluciones) / Paquetes * 100
+            df_mostrar["Performance %"] = df_mostrar.apply(
+                lambda x: ((x["Paquetes"] - x["Devoluciones"]) / x["Paquetes"] * 100) if x["Paquetes"] > 0 else 0, 
+                axis=1
+            )
+
+            # --- CONFIGURACIÓN DE ANCHO Y TIPO DE COLUMNAS ---
+            configuracion_columnas = {
+                "Cliente": st.column_config.TextColumn("Cliente", width="small"),
+                "Condición": st.column_config.TextColumn("Condición", width="small"),
+                "ambulancia": st.column_config.CheckboxColumn("Ambulancia", width="small"),
+                "costal": st.column_config.CheckboxColumn("Costal", width="small"),
+                "Paquetes": st.column_config.NumberColumn("Paquetes", width="small"),
+                "Devoluciones": st.column_config.NumberColumn("Devols.", width="small"),
+                "Paradas": st.column_config.NumberColumn("Paradas", width="small"),
+                "Performance %": st.column_config.NumberColumn("Performance %", format="%.1f %%", width="small")
+            }
+
+            st.dataframe(df_mostrar, use_container_width=True, hide_index=True, column_config=configuracion_columnas)
 
             st.write("---")
             st.subheader("✏️ Modificar o Eliminar Despacho")
@@ -665,8 +709,6 @@ with tab6:
                 df_filtrado["Placas"].fillna("Sin placas")
             )
             opciones = df_filtrado["_label"].tolist()
-            # Ojo: la tabla operaciones usa id_operacion, o id dependiendo de tu base. 
-            # Asegúrate que el nombre de columna de ID aquí coincida con tu base. Usaré 'id_operacion' según tu código anterior.
             col_id_op = "id_operacion" if "id_operacion" in df_filtrado.columns else "id"
             ids = df_filtrado[col_id_op].tolist()
 
@@ -716,7 +758,7 @@ with tab6:
 
                 fe3, fe4 = st.columns(2)
                 with fe3:
-                    nuevos_paquetes = st.number_input("Paquetes", min_value=0, value=int(fila["paquetes_cargados"]))
+                    nuevos_paquetes = st.number_input("Paquetes Cargados", min_value=0, value=int(fila["paquetes_cargados"]))
                 with fe4:
                     nuevas_paradas = st.number_input("Paradas", min_value=0, value=int(fila["paradas"]))
 
@@ -752,8 +794,8 @@ with tab6:
         # -------------------------------------------------------
         elif modulo_activo == "Devoluciones":
             m1, m2 = st.columns(2)
-            m1.metric("Total de Devoluciones", len(df_filtrado))
-            m2.metric("Total Paquetes Devueltos", int(df_filtrado["paquetes_devueltos"].sum()))
+            m1.metric("Total de Devoluciones Registradas", len(df_filtrado))
+            m2.metric("Suma Total Paquetes Devueltos", int(df_filtrado["paquetes_devueltos"].sum()))
             st.write("---")
 
             cols_dev = ["fecha_dev_str", "Conductor", "Placas", "tipo_cliente", "paquetes_devueltos"]
@@ -765,7 +807,14 @@ with tab6:
                 "tipo_cliente": "Cliente",
                 "paquetes_devueltos": "Paquetes Devueltos"
             })
-            st.dataframe(df_mostrar_dev, use_container_width=True, hide_index=True)
+            
+            # Ajuste de tamaño también para devoluciones
+            configuracion_columnas_dev = {
+                "Cliente": st.column_config.TextColumn("Cliente", width="small"),
+                "costal": st.column_config.CheckboxColumn("Costal", width="small"),
+                "Paquetes Devueltos": st.column_config.NumberColumn("Paquetes", width="small")
+            }
+            st.dataframe(df_mostrar_dev, use_container_width=True, hide_index=True, column_config=configuracion_columnas_dev)
 
             st.write("---")
             st.subheader("✏️ Modificar o Eliminar Devolución")
@@ -775,7 +824,6 @@ with tab6:
                 df_filtrado["tipo_cliente"]
             )
             opciones_dev = df_filtrado["_label"].tolist()
-            # En el script SQL la llave de devoluciones la llamamos 'id'
             ids_dev = df_filtrado["id"].tolist()
 
             sel_dev = st.selectbox("Selecciona la devolución a modificar:", opciones_dev)
@@ -808,7 +856,6 @@ with tab6:
                     
                     nuevos_paquetes_d = st.number_input("Paquetes Devueltos", min_value=1, value=int(fila_dev["paquetes_devueltos"]))
                     
-                    # Checkbox de Costal para devoluciones
                     costal_act_d = str(fila_dev.get("costal", False)).upper() in ["SÍ", "SI", "TRUE", "1"]
                     nuevo_costal_d = st.checkbox("¿Ruta de Costales?", value=costal_act_d)
 
