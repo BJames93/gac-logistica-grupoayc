@@ -218,8 +218,9 @@ with tab3:
                 sel_unidad = st.selectbox("Seleccione las Placas del Vehículo *", options=[""] + list(dict_unidades.keys()))
                 status_operacion = st.selectbox("Estatus del Servicio", options=["En ruta", "Cancelacion", "No show"])
                 
-                # --- NUEVO CAMPO: Checkbox Ambulancia ---
+                # --- CAMPOS BOOLEANOS (CHECKBOXES) ---
                 es_ambulancia = st.checkbox("¿Realizó Ambulancia?")
+                es_costal = st.checkbox("¿Es Costal?") # <-- NUEVO CAMPO AGREGADO
             
             with col2:
                 paquetes = st.number_input("Cantidad de Paquetes Cargados", min_value=0, step=1, value=0)
@@ -262,12 +263,14 @@ with tab3:
                         "hora_salida_hub": iso_salida,
                         "paquetes_cargados": int(paquetes),
                         "paradas": int(paradas),
-                        "ambulancia": es_ambulancia # <-- Nuevo campo booleano
+                        "ambulancia": es_ambulancia,
+                        "costal": es_costal # <-- NUEVO CAMPO AGREGADO AL DICCIONARIO
                     }
                     
                     try:
                         supabase.table("registro_operacion").insert(datos_operacion).execute()
-                        st.success(f"¡Viaje de {tipo_cliente} despachado correctamente! (Ambulancia: {'Sí' if es_ambulancia else 'No'})")
+                        # Se actualiza el mensaje de éxito para incluir ambas validaciones si lo deseas
+                        st.success(f"¡Viaje de {tipo_cliente} despachado correctamente! (Ambulancia: {'Sí' if es_ambulancia else 'No'} | Costal: {'Sí' if es_costal else 'No'})")
                     except Exception as e:
                         st.error(f"Error al registrar la operación en base de datos: {e}")
 # ==========================================
@@ -555,11 +558,13 @@ with tab6:
         m3.metric("Paradas Planificadas", int(df_filtrado["paradas"].sum()))
         st.write("---")
 
-        df_mostrar = df_filtrado[[
-            "hora_llegada_hub", "Conductor", "Placas", "Tipo Unidad",
-            "tipo_cliente", "status_operacion", "ambulancia",
-            "paquetes_cargados", "paradas"
-        ]].rename(columns={
+        # Se agrega la columna "costal" al DataFrame visual si existe en la base de datos
+        columnas_mostrar = ["hora_llegada_hub", "Conductor", "Placas", "Tipo Unidad", "tipo_cliente", "status_operacion", "ambulancia"]
+        if "costal" in df_filtrado.columns:
+            columnas_mostrar.append("costal")
+        columnas_mostrar.extend(["paquetes_cargados", "paradas"])
+
+        df_mostrar = df_filtrado[columnas_mostrar].rename(columns={
             "hora_llegada_hub": "Hora de Arribo",
             "tipo_cliente": "Cliente",
             "status_operacion": "Condición",
@@ -626,8 +631,16 @@ with tab6:
                 cond_status_idx = condiciones_opts.index(cond_status)
                 nueva_condicion = st.selectbox("Condición", condiciones_opts, index=cond_status_idx)
 
-                amb_actual = str(fila["ambulancia"]).upper() in ["SÍ", "SI", "TRUE", "1"]
-                nueva_ambulancia = st.checkbox("¿Realizó Ambulancia?", value=amb_actual)
+                # --- SUB-COLUMNAS PARA CHECKBOXES ALINEADOS ---
+                c_box1, c_box2 = st.columns(2)
+                with c_box1:
+                    amb_actual = str(fila["ambulancia"]).upper() in ["SÍ", "SI", "TRUE", "1"]
+                    nueva_ambulancia = st.checkbox("¿Realizó Ambulancia?", value=amb_actual)
+                with c_box2:
+                    # Validación segura por si existen registros previos sin la columna costal
+                    costal_base = fila.get("costal", False)
+                    costal_actual = str(costal_base).upper() in ["SÍ", "SI", "TRUE", "1"]
+                    nuevo_costal = st.checkbox("¿Es Costal?", value=costal_actual)
 
             fe3, fe4 = st.columns(2)
             with fe3:
@@ -653,6 +666,7 @@ with tab6:
                     "tipo_cliente": nuevo_cliente,
                     "status_operacion": nueva_condicion,
                     "ambulancia": nueva_ambulancia,
+                    "costal": nuevo_costal,  # ✅ NUEVO CAMPO AGREGADO EN LA ACTUALIZACIÓN
                     "paquetes_cargados": nuevos_paquetes,
                     "paradas": nuevas_paradas,
                 }
@@ -670,4 +684,3 @@ with tab6:
                 st.session_state.pop("tab6_df", None)  # ✅ Limpia para forzar nueva búsqueda
             except Exception as e:
                 st.error(f"Error al eliminar: {e}")
-
