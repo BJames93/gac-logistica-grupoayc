@@ -542,7 +542,14 @@ with tab5:
 # ===============================================
 with tab6:
     st.header("📊 Verificación de Captura")
-    st.write("Consulta y verifica los despachos operativos registrados en el sistema.")
+    st.write("Consulta, verifica y edita los registros operativos y devoluciones del sistema.")
+
+    # --- SELECCIÓN DE MÓDULO ---
+    modulo_consulta = st.radio(
+        "¿Qué registros deseas consultar?", 
+        ["Despachos Operativos", "Devoluciones"], 
+        horizontal=True
+    )
 
     # --- FILTROS DE FECHA ---
     c_ini, c_fin = st.columns(2)
@@ -553,182 +560,282 @@ with tab6:
 
     if st.button("Buscar Capturas"):
         try:
-            res_op = supabase.table("registro_operacion").select("*").execute()
-            df_op = pd.DataFrame(res_op.data)
+            # Descargamos los catálogos base (sirven para ambos módulos)
+            cond_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
+            unid_db = supabase.table("unidades").select("id_unidad, placas, tipo_unidad").execute().data
 
-            if not df_op.empty:
-                cond_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
-                unid_db = supabase.table("unidades").select("id_unidad, placas, tipo_unidad").execute().data
+            map_cond = {c["id_conductor"]: c["nombre_driver"] for c in cond_db}
+            map_unid = {u["id_unidad"]: u["placas"] for u in unid_db}
+            map_tipo_unid = {u["id_unidad"]: u.get("tipo_unidad", "N/A") for u in unid_db}
 
-                map_cond = {c["id_conductor"]: c["nombre_driver"] for c in cond_db}
-                map_unid = {u["id_unidad"]: u["placas"] for u in unid_db}
-                map_tipo_unid = {u["id_unidad"]: u.get("tipo_unidad", "N/A") for u in unid_db}
+            st.session_state["tab6_map_cond"] = map_cond
+            st.session_state["tab6_map_unid"] = map_unid
+            st.session_state["tab6_map_tipo"] = map_tipo_unid
+            st.session_state["tab6_modulo_activo"] = modulo_consulta
 
-                df_op["Conductor"] = df_op["conductor_id"].map(map_cond)
-                df_op["Placas"] = df_op["unidad_id"].map(map_unid)
-                df_op["Tipo Unidad"] = df_op["unidad_id"].map(map_tipo_unid)
-                df_op["hora_llegada_hub"] = pd.to_datetime(df_op["hora_llegada_hub"]).dt.tz_localize(None)
+            if modulo_consulta == "Despachos Operativos":
+                res_op = supabase.table("registro_operacion").select("*").execute()
+                df_op = pd.DataFrame(res_op.data)
 
-                mascara = (df_op["hora_llegada_hub"].dt.date >= fecha_inicio) & (df_op["hora_llegada_hub"].dt.date <= fecha_fin)
-                df_filtrado = df_op.loc[mascara].copy()
+                if not df_op.empty:
+                    df_op["Conductor"] = df_op["conductor_id"].map(map_cond)
+                    df_op["Placas"] = df_op["unidad_id"].map(map_unid)
+                    df_op["Tipo Unidad"] = df_op["unidad_id"].map(map_tipo_unid)
+                    df_op["hora_llegada_hub_raw"] = pd.to_datetime(df_op["hora_llegada_hub"]).dt.tz_localize(None)
 
-                if not df_filtrado.empty:
-                    df_filtrado["hora_llegada_hub"] = df_filtrado["hora_llegada_hub"].dt.strftime('%Y-%m-%d %H:%M')
+                    mascara = (df_op["hora_llegada_hub_raw"].dt.date >= fecha_inicio) & (df_op["hora_llegada_hub_raw"].dt.date <= fecha_fin)
+                    df_filtrado = df_op.loc[mascara].copy()
 
-                    # ✅ GUARDAMOS TODO EN SESSION STATE
-                    st.session_state["tab6_df"] = df_filtrado
-                    st.session_state["tab6_map_cond"] = map_cond
-                    st.session_state["tab6_map_unid"] = map_unid
-                    st.session_state["tab6_map_tipo"] = map_tipo_unid
+                    if not df_filtrado.empty:
+                        df_filtrado["hora_llegada_hub_str"] = df_filtrado["hora_llegada_hub_raw"].dt.strftime('%Y-%m-%d %H:%M')
+                        st.session_state["tab6_df"] = df_filtrado
+                    else:
+                        st.warning(f"No se encontraron despachos operativos entre {fecha_inicio} y {fecha_fin}.")
+                        st.session_state.pop("tab6_df", None)
                 else:
-                    st.warning(f"No se encontraron capturas registradas entre {fecha_inicio} y {fecha_fin}.")
+                    st.info("Aún no hay registros de operaciones.")
                     st.session_state.pop("tab6_df", None)
-            else:
-                st.info("Aún no hay registros de operaciones en la base de datos.")
-                st.session_state.pop("tab6_df", None)
+
+            elif modulo_consulta == "Devoluciones":
+                res_dev = supabase.table("devoluciones").select("*").execute()
+                df_dev = pd.DataFrame(res_dev.data)
+
+                if not df_dev.empty:
+                    df_dev["Conductor"] = df_dev["conductor_id"].map(map_cond)
+                    df_dev["Placas"] = df_dev["unidad_id"].map(map_unid)
+                    df_dev["fecha_dev_raw"] = pd.to_datetime(df_dev["fecha_devolucion"]).dt.date
+
+                    mascara = (df_dev["fecha_dev_raw"] >= fecha_inicio) & (df_dev["fecha_dev_raw"] <= fecha_fin)
+                    df_filtrado = df_dev.loc[mascara].copy()
+
+                    if not df_filtrado.empty:
+                        df_filtrado["fecha_dev_str"] = df_filtrado["fecha_dev_raw"].astype(str)
+                        st.session_state["tab6_df"] = df_filtrado
+                    else:
+                        st.warning(f"No se encontraron devoluciones entre {fecha_inicio} y {fecha_fin}.")
+                        st.session_state.pop("tab6_df", None)
+                else:
+                    st.info("Aún no hay devoluciones registradas.")
+                    st.session_state.pop("tab6_df", None)
 
         except Exception as e:
             st.error(f"Error al generar la consulta: {e}")
 
-    # ✅ TODO LO QUE SIGUE VIVE FUERA DEL BOTÓN, PERSISTE ENTRE RE-EJECUCIONES
-    if "tab6_df" in st.session_state:
-        df_filtrado   = st.session_state["tab6_df"]
-        map_cond      = st.session_state["tab6_map_cond"]
-        map_unid      = st.session_state["tab6_map_unid"]
+    # =======================================================
+    # VISTA Y EDICIÓN PERSISTENTE
+    # =======================================================
+    if "tab6_df" in st.session_state and "tab6_modulo_activo" in st.session_state:
+        df_filtrado = st.session_state["tab6_df"]
+        modulo_activo = st.session_state["tab6_modulo_activo"]
+        map_cond = st.session_state["tab6_map_cond"]
+        map_unid = st.session_state["tab6_map_unid"]
         map_tipo_unid = st.session_state["tab6_map_tipo"]
 
         st.write("---")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total de Viajes", len(df_filtrado))
-        m2.metric("Paquetes Procesados", int(df_filtrado["paquetes_cargados"].sum()))
-        m3.metric("Paradas Planificadas", int(df_filtrado["paradas"].sum()))
-        st.write("---")
-
-        # Se agrega la columna "costal" al DataFrame visual si existe en la base de datos
-        columnas_mostrar = ["hora_llegada_hub", "Conductor", "Placas", "Tipo Unidad", "tipo_cliente", "status_operacion", "ambulancia"]
-        if "costal" in df_filtrado.columns:
-            columnas_mostrar.append("costal")
-        columnas_mostrar.extend(["paquetes_cargados", "paradas"])
-
-        df_mostrar = df_filtrado[columnas_mostrar].rename(columns={
-            "hora_llegada_hub": "Hora de Arribo",
-            "tipo_cliente": "Cliente",
-            "status_operacion": "Condición",
-            "paquetes_cargados": "Paquetes",
-            "paradas": "Paradas"
-        })
-
-        st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
 
         # -------------------------------------------------------
-        # SECCIÓN DE MODIFICACIÓN / ELIMINACIÓN DE REGISTROS
+        # ESCENARIO A: DESPACHOS OPERATIVOS
         # -------------------------------------------------------
-        st.write("---")
-        st.subheader("✏️ Modificar o Eliminar un Registro")
-        st.caption("Selecciona un registro de la lista para editarlo o eliminarlo.")
+        if modulo_activo == "Despachos Operativos":
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total de Viajes", len(df_filtrado))
+            m2.metric("Paquetes Procesados", int(df_filtrado["paquetes_cargados"].sum()))
+            m3.metric("Paradas Planificadas", int(df_filtrado["paradas"].sum()))
+            st.write("---")
 
-        df_filtrado["_label"] = (
-            df_filtrado["hora_llegada_hub"].astype(str) + " | " +
-            df_filtrado["Conductor"].fillna("Sin conductor") + " | " +
-            df_filtrado["Placas"].fillna("Sin placas")
-        )
-        opciones = df_filtrado["_label"].tolist()
-        ids = df_filtrado["id_operacion"].tolist()
+            columnas_mostrar = ["hora_llegada_hub_str", "Conductor", "Placas", "Tipo Unidad", "tipo_cliente", "status_operacion", "ambulancia"]
+            if "costal" in df_filtrado.columns:
+                columnas_mostrar.append("costal")
+            columnas_mostrar.extend(["paquetes_cargados", "paradas"])
 
-        seleccion = st.selectbox("Selecciona el registro a modificar:", opciones)
-        idx_sel = opciones.index(seleccion)
-        id_sel = ids[idx_sel]
-        fila = df_filtrado.iloc[idx_sel]
+            df_mostrar = df_filtrado[columnas_mostrar].rename(columns={
+                "hora_llegada_hub_str": "Hora de Arribo",
+                "tipo_cliente": "Cliente",
+                "status_operacion": "Condición",
+                "paquetes_cargados": "Paquetes",
+                "paradas": "Paradas"
+            })
+            st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
 
-        # --- FORMULARIO DE EDICIÓN ---
-        with st.form("form_edicion"):
-            st.markdown("**Datos editables del registro seleccionado:**")
+            st.write("---")
+            st.subheader("✏️ Modificar o Eliminar Despacho")
+            df_filtrado["_label"] = (
+                df_filtrado["hora_llegada_hub_str"].astype(str) + " | " +
+                df_filtrado["Conductor"].fillna("Sin conductor") + " | " +
+                df_filtrado["Placas"].fillna("Sin placas")
+            )
+            opciones = df_filtrado["_label"].tolist()
+            # Ojo: la tabla operaciones usa id_operacion, o id dependiendo de tu base. 
+            # Asegúrate que el nombre de columna de ID aquí coincida con tu base. Usaré 'id_operacion' según tu código anterior.
+            col_id_op = "id_operacion" if "id_operacion" in df_filtrado.columns else "id"
+            ids = df_filtrado[col_id_op].tolist()
 
-            fe1, fe2 = st.columns(2)
-            with fe1:
-                hora_actual = pd.to_datetime(fila["hora_llegada_hub"])
-                nueva_fecha = st.date_input("Fecha de Arribo", value=hora_actual.date())
-                nueva_hora = st.time_input("Hora de Arribo", value=hora_actual.time())
+            seleccion = st.selectbox("Selecciona el despacho a modificar:", opciones)
+            idx_sel = opciones.index(seleccion)
+            id_sel = ids[idx_sel]
+            fila = df_filtrado.iloc[idx_sel]
 
-                nombres_cond = list(map_cond.values())
-                ids_cond = list(map_cond.keys())
-                cond_actual = map_cond.get(fila["conductor_id"], nombres_cond[0])
-                cond_idx = nombres_cond.index(cond_actual) if cond_actual in nombres_cond else 0
-                nuevo_cond = st.selectbox("Conductor", nombres_cond, index=cond_idx)
-                nuevo_cond_id = ids_cond[nombres_cond.index(nuevo_cond)]
+            with st.form("form_edicion_op"):
+                fe1, fe2 = st.columns(2)
+                with fe1:
+                    hora_actual = fila["hora_llegada_hub_raw"]
+                    nueva_fecha = st.date_input("Fecha de Arribo", value=hora_actual.date())
+                    nueva_hora = st.time_input("Hora de Arribo", value=hora_actual.time())
 
-                placas_list = list(map_unid.values())
-                ids_unid = list(map_unid.keys())
-                placa_actual = map_unid.get(fila["unidad_id"], placas_list[0])
-                unid_idx = placas_list.index(placa_actual) if placa_actual in placas_list else 0
-                nueva_placa = st.selectbox("Placas / Unidad", placas_list, index=unid_idx)
-                nueva_unid_id = ids_unid[placas_list.index(nueva_placa)]
+                    nombres_cond = list(map_cond.values())
+                    ids_cond = list(map_cond.keys())
+                    cond_actual = map_cond.get(fila["conductor_id"], nombres_cond[0])
+                    cond_idx = nombres_cond.index(cond_actual) if cond_actual in nombres_cond else 0
+                    nuevo_cond = st.selectbox("Conductor", nombres_cond, index=cond_idx)
+                    nuevo_cond_id = ids_cond[nombres_cond.index(nuevo_cond)]
 
-            with fe2:
-                st.text_input("Tipo de Unidad (automático)", value=map_tipo_unid.get(nueva_unid_id, "N/A"), disabled=True)
+                    placas_list = list(map_unid.values())
+                    ids_unid = list(map_unid.keys())
+                    placa_actual = map_unid.get(fila["unidad_id"], placas_list[0])
+                    unid_idx = placas_list.index(placa_actual) if placa_actual in placas_list else 0
+                    nueva_placa = st.selectbox("Placas / Unidad", placas_list, index=unid_idx)
+                    nueva_unid_id = ids_unid[placas_list.index(nueva_placa)]
 
-                clientes_opts = ["Mercado Libre", "Amazon"]
-                cli_actual = fila["tipo_cliente"] if fila["tipo_cliente"] in clientes_opts else clientes_opts[0]
-                cli_idx = clientes_opts.index(cli_actual)
-                nuevo_cliente = st.selectbox("Cliente", clientes_opts, index=cli_idx)
+                with fe2:
+                    st.text_input("Tipo de Unidad", value=map_tipo_unid.get(nueva_unid_id, "N/A"), disabled=True)
+                    clientes_opts = ["Mercado Libre", "Amazon"]
+                    cli_actual = fila["tipo_cliente"] if fila["tipo_cliente"] in clientes_opts else clientes_opts[0]
+                    nuevo_cliente = st.selectbox("Cliente", clientes_opts, index=clientes_opts.index(cli_actual))
 
-                condiciones_opts = ["En ruta", "Cancelacion", "No show"]
-                cond_status = fila["status_operacion"] if fila["status_operacion"] in condiciones_opts else condiciones_opts[0]
-                cond_status_idx = condiciones_opts.index(cond_status)
-                nueva_condicion = st.selectbox("Condición", condiciones_opts, index=cond_status_idx)
+                    condiciones_opts = ["En ruta", "Cancelacion", "No show"]
+                    cond_status = fila["status_operacion"] if fila["status_operacion"] in condiciones_opts else condiciones_opts[0]
+                    nueva_condicion = st.selectbox("Condición", condiciones_opts, index=condiciones_opts.index(cond_status))
 
-                # --- SUB-COLUMNAS PARA CHECKBOXES ALINEADOS ---
-                c_box1, c_box2 = st.columns(2)
-                with c_box1:
-                    amb_actual = str(fila["ambulancia"]).upper() in ["SÍ", "SI", "TRUE", "1"]
-                    nueva_ambulancia = st.checkbox("¿Realizó Ambulancia?", value=amb_actual)
-                with c_box2:
-                    # Validación segura por si existen registros previos sin la columna costal
-                    costal_base = fila.get("costal", False)
-                    costal_actual = str(costal_base).upper() in ["SÍ", "SI", "TRUE", "1"]
-                    nuevo_costal = st.checkbox("¿Es Costal?", value=costal_actual)
+                    c_box1, c_box2 = st.columns(2)
+                    with c_box1:
+                        amb_actual = str(fila["ambulancia"]).upper() in ["SÍ", "SI", "TRUE", "1"]
+                        nueva_ambulancia = st.checkbox("¿Realizó Ambulancia?", value=amb_actual)
+                    with c_box2:
+                        costal_actual = str(fila.get("costal", False)).upper() in ["SÍ", "SI", "TRUE", "1"]
+                        nuevo_costal = st.checkbox("¿Es Costal?", value=costal_actual)
 
-            fe3, fe4 = st.columns(2)
-            with fe3:
-                nuevos_paquetes = st.number_input("Paquetes", min_value=0, value=int(fila["paquetes_cargados"]))
-            with fe4:
-                nuevas_paradas = st.number_input("Paradas", min_value=0, value=int(fila["paradas"]))
+                fe3, fe4 = st.columns(2)
+                with fe3:
+                    nuevos_paquetes = st.number_input("Paquetes", min_value=0, value=int(fila["paquetes_cargados"]))
+                with fe4:
+                    nuevas_paradas = st.number_input("Paradas", min_value=0, value=int(fila["paradas"]))
 
-            st.write("")
-            col_guardar, col_borrar = st.columns([3, 1])
-            with col_guardar:
-                guardar = st.form_submit_button("💾 Guardar Cambios", use_container_width=True)
-            with col_borrar:
-                borrar = st.form_submit_button("🗑️ Eliminar Registro", use_container_width=True, type="secondary")
+                col_guardar, col_borrar = st.columns([3, 1])
+                guardar = col_guardar.form_submit_button("💾 Guardar Cambios Operación", use_container_width=True)
+                borrar = col_borrar.form_submit_button("🗑️ Eliminar Registro", use_container_width=True, type="secondary")
 
-        # --- ACCIÓN: GUARDAR ---
-        if guardar:
-            try:
-                nueva_datetime = datetime.combine(nueva_fecha, nueva_hora).isoformat()
-                payload = {
-                    "hora_llegada_hub": nueva_datetime,
-                    "conductor_id": nuevo_cond_id,
-                    "unidad_id": nueva_unid_id,
-                    "tipo_cliente": nuevo_cliente,
-                    "status_operacion": nueva_condicion,
-                    "ambulancia": nueva_ambulancia,
-                    "costal": nuevo_costal,  # ✅ NUEVO CAMPO AGREGADO EN LA ACTUALIZACIÓN
-                    "paquetes_cargados": nuevos_paquetes,
-                    "paradas": nuevas_paradas,
-                }
-                supabase.table("registro_operacion").update(payload).eq("id_operacion", id_sel).execute()
-                st.success(f"✅ Registro #{id_sel} actualizado correctamente. Vuelve a buscar para ver los cambios.")
-                st.session_state.pop("tab6_df", None)  # ✅ Limpia para forzar nueva búsqueda
-            except Exception as e:
-                st.error(f"Error al guardar: {e}")
+            if guardar:
+                try:
+                    payload = {
+                        "hora_llegada_hub": datetime.combine(nueva_fecha, nueva_hora).isoformat(),
+                        "conductor_id": nuevo_cond_id, "unidad_id": nueva_unid_id,
+                        "tipo_cliente": nuevo_cliente, "status_operacion": nueva_condicion,
+                        "ambulancia": nueva_ambulancia, "costal": nuevo_costal,
+                        "paquetes_cargados": nuevos_paquetes, "paradas": nuevas_paradas,
+                    }
+                    supabase.table("registro_operacion").update(payload).eq(col_id_op, id_sel).execute()
+                    st.success("✅ Registro actualizado correctamente. Vuelve a buscar para ver los cambios.")
+                    st.session_state.pop("tab6_df", None)
+                except Exception as e:
+                    st.error(f"Error al guardar: {e}")
 
-        # --- ACCIÓN: ELIMINAR ---
-        if borrar:
-            try:
-                supabase.table("registro_operacion").delete().eq("id_operacion", id_sel).execute()
-                st.warning(f"🗑️ Registro #{id_sel} eliminado de la base de datos.")
-                st.session_state.pop("tab6_df", None)  # ✅ Limpia para forzar nueva búsqueda
-            except Exception as e:
-                st.error(f"Error al eliminar: {e}")
+            if borrar:
+                try:
+                    supabase.table("registro_operacion").delete().eq(col_id_op, id_sel).execute()
+                    st.warning("🗑️ Registro eliminado de la base de datos.")
+                    st.session_state.pop("tab6_df", None)
+                except Exception as e:
+                    st.error(f"Error al eliminar: {e}")
 
+        # -------------------------------------------------------
+        # ESCENARIO B: DEVOLUCIONES
+        # -------------------------------------------------------
+        elif modulo_activo == "Devoluciones":
+            m1, m2 = st.columns(2)
+            m1.metric("Total de Devoluciones", len(df_filtrado))
+            m2.metric("Total Paquetes Devueltos", int(df_filtrado["paquetes_devueltos"].sum()))
+            st.write("---")
 
+            cols_dev = ["fecha_dev_str", "Conductor", "Placas", "tipo_cliente", "paquetes_devueltos"]
+            if "costal" in df_filtrado.columns:
+                cols_dev.append("costal")
+
+            df_mostrar_dev = df_filtrado[cols_dev].rename(columns={
+                "fecha_dev_str": "Fecha",
+                "tipo_cliente": "Cliente",
+                "paquetes_devueltos": "Paquetes Devueltos"
+            })
+            st.dataframe(df_mostrar_dev, use_container_width=True, hide_index=True)
+
+            st.write("---")
+            st.subheader("✏️ Modificar o Eliminar Devolución")
+            df_filtrado["_label"] = (
+                df_filtrado["fecha_dev_str"] + " | " + 
+                df_filtrado["Conductor"].fillna("Sin conductor") + " | " + 
+                df_filtrado["tipo_cliente"]
+            )
+            opciones_dev = df_filtrado["_label"].tolist()
+            # En el script SQL la llave de devoluciones la llamamos 'id'
+            ids_dev = df_filtrado["id"].tolist()
+
+            sel_dev = st.selectbox("Selecciona la devolución a modificar:", opciones_dev)
+            idx_dev = opciones_dev.index(sel_dev)
+            id_sel_dev = ids_dev[idx_dev]
+            fila_dev = df_filtrado.iloc[idx_dev]
+
+            with st.form("form_edicion_dev"):
+                fd1, fd2 = st.columns(2)
+                with fd1:
+                    fecha_act = fila_dev["fecha_dev_raw"]
+                    nueva_fecha_d = st.date_input("Fecha de Devolución", value=fecha_act)
+
+                    nombres_cond = list(map_cond.values())
+                    ids_cond = list(map_cond.keys())
+                    cond_act = map_cond.get(fila_dev["conductor_id"], nombres_cond[0])
+                    nuevo_cond_d = st.selectbox("Conductor", nombres_cond, index=nombres_cond.index(cond_act))
+                    nuevo_cond_id_d = ids_cond[nombres_cond.index(nuevo_cond_d)]
+
+                    placas_list = list(map_unid.values())
+                    ids_unid = list(map_unid.keys())
+                    placa_act = map_unid.get(fila_dev["unidad_id"], placas_list[0])
+                    nueva_placa_d = st.selectbox("Placas", placas_list, index=placas_list.index(placa_act))
+                    nueva_unid_id_d = ids_unid[placas_list.index(nueva_placa_d)]
+
+                with fd2:
+                    clientes_opts = ["Mercado Libre", "Amazon"]
+                    cli_act = fila_dev["tipo_cliente"] if fila_dev["tipo_cliente"] in clientes_opts else clientes_opts[0]
+                    nuevo_cliente_d = st.selectbox("Cliente", clientes_opts, index=clientes_opts.index(cli_act))
+                    
+                    nuevos_paquetes_d = st.number_input("Paquetes Devueltos", min_value=1, value=int(fila_dev["paquetes_devueltos"]))
+                    
+                    # Checkbox de Costal para devoluciones
+                    costal_act_d = str(fila_dev.get("costal", False)).upper() in ["SÍ", "SI", "TRUE", "1"]
+                    nuevo_costal_d = st.checkbox("¿Ruta de Costales?", value=costal_act_d)
+
+                col_g_dev, col_b_dev = st.columns([3, 1])
+                guardar_dev = col_g_dev.form_submit_button("💾 Guardar Cambios Devolución", use_container_width=True)
+                borrar_dev = col_b_dev.form_submit_button("🗑️ Eliminar Registro", use_container_width=True, type="secondary")
+
+            if guardar_dev:
+                try:
+                    payload_dev = {
+                        "fecha_devolucion": nueva_fecha_d.isoformat(),
+                        "conductor_id": nuevo_cond_id_d,
+                        "unidad_id": nueva_unid_id_d,
+                        "tipo_cliente": nuevo_cliente_d,
+                        "paquetes_devueltos": nuevos_paquetes_d,
+                        "costal": nuevo_costal_d
+                    }
+                    supabase.table("devoluciones").update(payload_dev).eq("id", id_sel_dev).execute()
+                    st.success("✅ Devolución actualizada correctamente. Vuelve a buscar para ver los cambios.")
+                    st.session_state.pop("tab6_df", None)
+                except Exception as e:
+                    st.error(f"Error al guardar: {e}")
+
+            if borrar_dev:
+                try:
+                    supabase.table("devoluciones").delete().eq("id", id_sel_dev).execute()
+                    st.warning("🗑️ Devolución eliminada de la base de datos.")
+                    st.session_state.pop("tab6_df", None)
+                except Exception as e:
+                    st.error(f"Error al eliminar: {e}")
