@@ -6,7 +6,7 @@ import unicodedata # <--- Importante para limpiar acentos
 import io
 import zipfile
 import requests
-
+from fpdf import FPDF
 # --- 1. CONFIGURACIÓN E INICIALIZACIÓN DE CREDENCIALES ---
 SUPABASE_URL = "https://wfdhuzlohwcemfjeudrl.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndmZGh1emxvaHdjZW1mamV1ZHJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNDM0NDEsImV4cCI6MjA5NDgxOTQ0MX0.ecnOCJnMDxHpYHuZmAvR5Fy95utOsFZ1Xjg3Xzyj8UM"
@@ -812,8 +812,18 @@ with tab6:
 if es_admin:
     with tab_reporte: 
         st.header("📊 Reporte de Conciliación y Facturación")
-        st.info("Esta pestaña es privada mediante URL.")
+        st.info("Esta pestaña es privada mediante URL. Módulo de cálculo fiscal y exportación.")
         
+        # --- SELECTOR DE EMPRESA Y RÉGIMEN ---
+        empresa_seleccionada = st.radio(
+            "Seleccione la Empresa (Régimen Fiscal):", 
+            ["Grupo AyC (RESICO - Retención 1.25%)", "Boulder Brwn (Persona Moral - Sin Retención)"],
+            horizontal=True
+        )
+        
+        es_resico = "RESICO" in empresa_seleccionada
+        nombre_empresa_corte = "Grupo AyC" if es_resico else "Boulder Brwn"
+
         # Parámetros del reporte
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -825,6 +835,7 @@ if es_admin:
             
         if st.button("Generar Conciliación"):
             try:
+                # 1. Consulta a Supabase
                 res_reporte = supabase.table("registro_operacion").select("*").execute()
                 df_rep = pd.DataFrame(res_reporte.data)
                 
@@ -834,14 +845,19 @@ if es_admin:
                     df_periodo = df_rep.loc[mascara_fechas].copy()
                     
                     if not df_periodo.empty:
-                        # 2. CÁLCULOS FINANCIEROS RESICO
+                        # 2. CÁLCULOS FINANCIEROS DINÁMICOS
                         if "monto_final_unidad" not in df_periodo.columns:
                             df_periodo["monto_final_unidad"] = 1750.00 
                             
                         df_periodo["Subtotal"] = df_periodo["monto_final_unidad"]
                         df_periodo["IVA"] = df_periodo["Subtotal"] * 0.16
-                        # Retención exclusiva para régimen RESICO (1.25% ISR)
-                        df_periodo["Retencion"] = df_periodo["Subtotal"] * 0.0125
+                        
+                        # APLICACIÓN DE RETENCIÓN SEGÚN LA EMPRESA SELECCIONADA
+                        if es_resico:
+                            df_periodo["Retencion"] = df_periodo["Subtotal"] * 0.0125
+                        else:
+                            df_periodo["Retencion"] = 0.0
+                            
                         df_periodo["Total"] = df_periodo["Subtotal"] + df_periodo["IVA"] - df_periodo["Retencion"]
                         
                         dia_ini = fecha_ini.strftime('%d')
@@ -849,20 +865,21 @@ if es_admin:
                         meses = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
                         mes_texto = meses[fecha_fin.month]
                         
+                        titulo_periodo = f"CORTE {dia_ini} AL {dia_fin} DE {mes_texto} SEMANA {semana_corte}"
+                        
                         st.divider()
                         
                         # --- SECCIÓN 1: AMAZON ---
-                        st.subheader(f"CORTE {dia_ini} AL {dia_fin} DE {mes_texto} SEMANA {semana_corte} AMAZON")
+                        st.subheader(f"{titulo_periodo} - AMAZON")
                         df_amazon = df_periodo[df_periodo["tipo_cliente"] == "Amazon"].copy()
                         
                         if not df_amazon.empty:
                             st.dataframe(df_amazon, use_container_width=True)
-                            
                             st.write("**Resumen Financiero - Amazon**")
                             col_a1, col_a2, col_a3, col_a4 = st.columns(4)
                             col_a1.metric("Subtotal", f"${df_amazon['Subtotal'].sum():,.2f}")
                             col_a2.metric("IVA (16%)", f"${df_amazon['IVA'].sum():,.2f}")
-                            col_a3.metric("Retención (1.25%)", f"${df_amazon['Retencion'].sum():,.2f}")
+                            col_a3.metric("Retención", f"${df_amazon['Retencion'].sum():,.2f}")
                             col_a4.metric("Total Final", f"${df_amazon['Total'].sum():,.2f}")
                         else:
                             st.info("No hay registros de Amazon para este periodo.")
@@ -870,25 +887,24 @@ if es_admin:
                         st.divider()
                         
                         # --- SECCIÓN 2: MERCADO LIBRE ---
-                        st.subheader(f"CORTE {dia_ini} AL {dia_fin} DE {mes_texto} SEMANA {semana_corte} MERCADO LIBRE")
+                        st.subheader(f"{titulo_periodo} - MERCADO LIBRE")
                         df_ml = df_periodo[df_periodo["tipo_cliente"] == "Mercado Libre"].copy()
                         
                         if not df_ml.empty:
                             st.dataframe(df_ml, use_container_width=True)
-                            
                             st.write("**Resumen Financiero - Mercado Libre**")
                             col_m1, col_m2, col_m3, col_m4 = st.columns(4)
                             col_m1.metric("Subtotal", f"${df_ml['Subtotal'].sum():,.2f}")
                             col_m2.metric("IVA (16%)", f"${df_ml['IVA'].sum():,.2f}")
-                            col_m3.metric("Retención (1.25%)", f"${df_ml['Retencion'].sum():,.2f}")
+                            col_m3.metric("Retención", f"${df_ml['Retencion'].sum():,.2f}")
                             col_m4.metric("Total Final", f"${df_ml['Total'].sum():,.2f}")
                         else:
                             st.info("No hay registros de Mercado Libre para este periodo.")
                             
                         st.divider()
                         
-                        # --- GRAN TOTAL GRUPO AYC ---
-                        st.subheader("Gran Total del Periodo (Todos los Clientes)")
+                        # --- GRAN TOTAL ---
+                        st.subheader(f"Gran Total del Periodo - {nombre_empresa_corte}")
                         t_sub = df_periodo['Subtotal'].sum()
                         t_iva = df_periodo['IVA'].sum()
                         t_ret = df_periodo['Retencion'].sum()
@@ -897,9 +913,79 @@ if es_admin:
                         st.markdown(f"""
                         * **SUBTOTAL:** ${t_sub:,.2f}
                         * **IVA:** ${t_iva:,.2f}
-                        * **RETENCIÓN (1.25%):** ${t_ret:,.2f}
+                        * **RETENCIÓN:** ${t_ret:,.2f}
                         * **TOTAL FINAL:** **${t_tot:,.2f}**
                         """)
+                        
+                        # ==========================================
+                        # MÓDULO DE EXPORTACIÓN (EXCEL Y PDF)
+                        # ==========================================
+                        st.write("---")
+                        st.subheader("📥 Exportar Reportes")
+                        col_btn1, col_btn2 = st.columns(2)
+                        
+                        # 1. FUNCIÓN PARA EXCEL
+                        def generar_excel():
+                            output = io.BytesIO()
+                            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                                if not df_amazon.empty:
+                                    df_amazon.to_excel(writer, sheet_name='Amazon', index=False)
+                                if not df_ml.empty:
+                                    df_ml.to_excel(writer, sheet_name='Mercado Libre', index=False)
+                                
+                                # Pestaña de resumen
+                                df_resumen = pd.DataFrame([{
+                                    "Empresa": nombre_empresa_corte,
+                                    "Periodo": titulo_periodo,
+                                    "Subtotal Total": t_sub,
+                                    "IVA Total": t_iva,
+                                    "Retencion Total": t_ret,
+                                    "Total Final": t_tot
+                                }])
+                                df_resumen.to_excel(writer, sheet_name='Resumen Financiero', index=False)
+                            return output.getvalue()
+                            
+                        # 2. FUNCIÓN PARA PDF (Resumen Ejecutivo)
+                        def generar_pdf():
+                            pdf = FPDF()
+                            pdf.add_page()
+                            pdf.set_font("Arial", 'B', 16)
+                            pdf.cell(200, 10, txt=f"Reporte de Conciliacion - {nombre_empresa_corte}", ln=True, align='C')
+                            pdf.set_font("Arial", size=12)
+                            pdf.cell(200, 10, txt=f"Periodo: {titulo_periodo}", ln=True, align='C')
+                            pdf.ln(10)
+                            
+                            pdf.set_font("Arial", 'B', 12)
+                            pdf.cell(200, 10, txt="RESUMEN FINANCIERO GLOBAL", ln=True)
+                            pdf.set_font("Arial", size=12)
+                            pdf.cell(100, 10, txt=f"Subtotal:", border=1)
+                            pdf.cell(90, 10, txt=f"${t_sub:,.2f}", border=1, ln=True, align='R')
+                            pdf.cell(100, 10, txt=f"IVA (16%):", border=1)
+                            pdf.cell(90, 10, txt=f"${t_iva:,.2f}", border=1, ln=True, align='R')
+                            pdf.cell(100, 10, txt=f"Retencion:", border=1)
+                            pdf.cell(90, 10, txt=f"${t_ret:,.2f}", border=1, ln=True, align='R')
+                            pdf.set_font("Arial", 'B', 12)
+                            pdf.cell(100, 10, txt=f"TOTAL FINAL:", border=1)
+                            pdf.cell(90, 10, txt=f"${t_tot:,.2f}", border=1, ln=True, align='R')
+                            
+                            return pdf.output(dest='S').encode('latin1')
+
+                        # Botones de descarga
+                        with col_btn1:
+                            st.download_button(
+                                label="📊 Descargar Sábana en Excel",
+                                data=generar_excel(),
+                                file_name=f"Conciliacion_{nombre_empresa_corte}_Semana{semana_corte}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                        with col_btn2:
+                            st.download_button(
+                                label="📄 Descargar Resumen en PDF",
+                                data=generar_pdf(),
+                                file_name=f"Resumen_{nombre_empresa_corte}_Semana{semana_corte}.pdf",
+                                mime="application/pdf"
+                            )
+                            
                     else:
                         st.warning("No se encontraron viajes capturados en las fechas seleccionadas.")
             except Exception as e:
