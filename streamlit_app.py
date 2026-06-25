@@ -48,7 +48,25 @@ def procesar_archivo(archivo, carpeta, identificador):
 # --- INTERFAZ ---
 st.set_page_config(page_title="Grupo AyC",page_icon=":truck:",layout="wide")
 st.title("📊 Sistema Centralizado Grupo AyC")
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🚗 Alta de Conductores", "🚛 Control de Unidades", "📋 Registro de Operación","🔍 Consulta Integral","🔄 Actualización de Expedientes","📊 Verificación de Captura"])
+# ==========================================
+# CREACIÓN DINÁMICA DE PESTAÑAS (TABS SECRETO)
+# ==========================================
+# Detectamos si en la URL está la palabra secreta
+es_admin = st.query_params.get("admin") == "AyC2026"
+
+if es_admin:
+    # Si la URL tiene ?admin=AyC2026, dibuja 7 pestañas (6 normales + 1 secreta)
+    tab1, tab2, tab3, tab4, tab5, tab6, tab_reporte = st.tabs([
+        "🚗 Alta de Conductores", "🚛 Control de Unidades", "📋 Registro de Operación",
+        "🔍 Consulta Integral", "🔄 Actualización de Expedientes", "📊 Verificación de Captura", 
+        "📈 Conciliación"
+    ])
+else:
+    # Si es la URL normal, solo dibuja 6 (para proveedores)
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🚗 Alta de Conductores", "🚛 Control de Unidades", "📋 Registro de Operación",
+        "🔍 Consulta Integral", "🔄 Actualización de Expedientes", "📊 Verificación de Captura"
+    ])
 
 # ==========================================
 # PESTAÑA 1: ALTA DE CONDUCTOR
@@ -788,3 +806,101 @@ with tab6:
                     supabase.table("devoluciones").delete().eq("id", id_sel_dev).execute()
                     st.warning("🗑️ Eliminado."); st.session_state.pop("tab6_df", None); st.rerun()
 
+# ===============================================
+# NUEVA PESTAÑA: REPORTE DE CONCILIACIÓN (SECRETA)
+# ===============================================
+if es_admin:
+    with tab_reporte: 
+        st.header("📊 Reporte de Conciliación y Facturación")
+        st.info("Esta pestaña es privada mediante URL.")
+        
+        # Parámetros del reporte
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            fecha_ini = st.date_input("Fecha Inicio de Corte")
+        with c2:
+            fecha_fin = st.date_input("Fecha Fin de Corte")
+        with c3:
+            semana_corte = st.number_input("Número de Semana (Ej. 24)", min_value=1, step=1, value=24)
+            
+        if st.button("Generar Conciliación"):
+            try:
+                res_reporte = supabase.table("registro_operacion").select("*").execute()
+                df_rep = pd.DataFrame(res_reporte.data)
+                
+                if not df_rep.empty:
+                    df_rep["fecha_raw"] = pd.to_datetime(df_rep["hora_llegada_hub"]).dt.tz_localize(None).dt.date
+                    mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
+                    df_periodo = df_rep.loc[mascara_fechas].copy()
+                    
+                    if not df_periodo.empty:
+                        # 2. CÁLCULOS FINANCIEROS RESICO
+                        if "monto_final_unidad" not in df_periodo.columns:
+                            df_periodo["monto_final_unidad"] = 1750.00 
+                            
+                        df_periodo["Subtotal"] = df_periodo["monto_final_unidad"]
+                        df_periodo["IVA"] = df_periodo["Subtotal"] * 0.16
+                        # Retención exclusiva para régimen RESICO (1.25% ISR)
+                        df_periodo["Retencion"] = df_periodo["Subtotal"] * 0.0125
+                        df_periodo["Total"] = df_periodo["Subtotal"] + df_periodo["IVA"] - df_periodo["Retencion"]
+                        
+                        dia_ini = fecha_ini.strftime('%d')
+                        dia_fin = fecha_fin.strftime('%d')
+                        meses = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+                        mes_texto = meses[fecha_fin.month]
+                        
+                        st.divider()
+                        
+                        # --- SECCIÓN 1: AMAZON ---
+                        st.subheader(f"CORTE {dia_ini} AL {dia_fin} DE {mes_texto} SEMANA {semana_corte} AMAZON")
+                        df_amazon = df_periodo[df_periodo["tipo_cliente"] == "Amazon"].copy()
+                        
+                        if not df_amazon.empty:
+                            st.dataframe(df_amazon, use_container_width=True)
+                            
+                            st.write("**Resumen Financiero - Amazon**")
+                            col_a1, col_a2, col_a3, col_a4 = st.columns(4)
+                            col_a1.metric("Subtotal", f"${df_amazon['Subtotal'].sum():,.2f}")
+                            col_a2.metric("IVA (16%)", f"${df_amazon['IVA'].sum():,.2f}")
+                            col_a3.metric("Retención (1.25%)", f"${df_amazon['Retencion'].sum():,.2f}")
+                            col_a4.metric("Total Final", f"${df_amazon['Total'].sum():,.2f}")
+                        else:
+                            st.info("No hay registros de Amazon para este periodo.")
+                            
+                        st.divider()
+                        
+                        # --- SECCIÓN 2: MERCADO LIBRE ---
+                        st.subheader(f"CORTE {dia_ini} AL {dia_fin} DE {mes_texto} SEMANA {semana_corte} MERCADO LIBRE")
+                        df_ml = df_periodo[df_periodo["tipo_cliente"] == "Mercado Libre"].copy()
+                        
+                        if not df_ml.empty:
+                            st.dataframe(df_ml, use_container_width=True)
+                            
+                            st.write("**Resumen Financiero - Mercado Libre**")
+                            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+                            col_m1.metric("Subtotal", f"${df_ml['Subtotal'].sum():,.2f}")
+                            col_m2.metric("IVA (16%)", f"${df_ml['IVA'].sum():,.2f}")
+                            col_m3.metric("Retención (1.25%)", f"${df_ml['Retencion'].sum():,.2f}")
+                            col_m4.metric("Total Final", f"${df_ml['Total'].sum():,.2f}")
+                        else:
+                            st.info("No hay registros de Mercado Libre para este periodo.")
+                            
+                        st.divider()
+                        
+                        # --- GRAN TOTAL GRUPO AYC ---
+                        st.subheader("Gran Total del Periodo (Todos los Clientes)")
+                        t_sub = df_periodo['Subtotal'].sum()
+                        t_iva = df_periodo['IVA'].sum()
+                        t_ret = df_periodo['Retencion'].sum()
+                        t_tot = df_periodo['Total'].sum()
+                        
+                        st.markdown(f"""
+                        * **SUBTOTAL:** ${t_sub:,.2f}
+                        * **IVA:** ${t_iva:,.2f}
+                        * **RETENCIÓN (1.25%):** ${t_ret:,.2f}
+                        * **TOTAL FINAL:** **${t_tot:,.2f}**
+                        """)
+                    else:
+                        st.warning("No se encontraron viajes capturados en las fechas seleccionadas.")
+            except Exception as e:
+                st.error(f"Error al generar el reporte: {e}")
