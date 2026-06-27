@@ -936,84 +936,87 @@ if es_admin:
                                 df_resumen.to_excel(writer, sheet_name='Resumen Financiero', index=False)
                             return output.getvalue()
                             
-                        # 2. FUNCIÓN PARA PDF (Detallado Múltiples Páginas)
+                        # 2. FUNCIÓN PARA PDF (Detallado, Orientación Horizontal, Múltiples Páginas)
                         def generar_pdf():
-                            pdf = FPDF()
-                            
+                            pdf = FPDF(orientation='L', unit='mm', format='A4')  # Orientación horizontal
+
                             # --- PÁGINA 1: RESUMEN GLOBAL ---
                             pdf.add_page()
                             pdf.set_font("Arial", 'B', 16)
-                            pdf.cell(200, 10, txt=f"Reporte de Conciliacion - {nombre_empresa_corte}", ln=True, align='C')
+                            pdf.cell(270, 10, txt=f"Reporte de Conciliacion - {nombre_empresa_corte}", ln=True, align='C')
                             pdf.set_font("Arial", size=12)
-                            pdf.cell(200, 10, txt=f"Periodo: {titulo_periodo}", ln=True, align='C')
+                            pdf.cell(270, 10, txt=f"Periodo: {titulo_periodo}", ln=True, align='C')
                             pdf.ln(10)
-                            
-                            pdf.set_font("Arial", 'B', 12)
-                            pdf.cell(200, 10, txt="RESUMEN FINANCIERO GLOBAL", ln=True)
-                            pdf.set_font("Arial", size=12)
-                            pdf.cell(100, 10, txt=f"Subtotal:", border=1)
-                            pdf.cell(90, 10, txt=f"${t_sub:,.2f}", border=1, ln=True, align='R')
-                            pdf.cell(100, 10, txt=f"IVA (16%):", border=1)
-                            pdf.cell(90, 10, txt=f"${t_iva:,.2f}", border=1, ln=True, align='R')
-                            pdf.cell(100, 10, txt=f"Retencion:", border=1)
-                            pdf.cell(90, 10, txt=f"${t_ret:,.2f}", border=1, ln=True, align='R')
-                            pdf.set_font("Arial", 'B', 12)
-                            pdf.cell(100, 10, txt=f"TOTAL FINAL:", border=1)
-                            pdf.cell(90, 10, txt=f"${t_tot:,.2f}", border=1, ln=True, align='R')
-                            pdf.ln(5)
 
-                            # Función auxiliar para pintar tablas dinámicas
-                            def crear_tabla_pdf(df_datos, titulo):
+                            # Tabla Resumen Global
+                            pdf.set_font("Arial", 'B', 12)
+                            pdf.cell(270, 10, txt="RESUMEN FINANCIERO GLOBAL", ln=True, align='L')
+                            pdf.set_font("Arial", size=12)
+                            datos_resumen = [("Subtotal", t_sub), ("IVA (16%)", t_iva), ("Retencion", t_ret), ("TOTAL FINAL", t_tot)]
+                            for label, val in datos_resumen:
+                                pdf.cell(100, 10, label, border=1)
+                                pdf.cell(50, 10, f"${val:,.2f}", border=1, ln=True, align='R')
+
+                            # --- PÁGINA 2+: TABLAS DETALLADAS ---
+                            def crear_tabla_detalle(df, titulo, es_amazon=True):
                                 pdf.add_page()
                                 pdf.set_font("Arial", 'B', 14)
-                                pdf.cell(200, 10, txt=titulo, ln=True, align='C')
-                                pdf.ln(5)
+                                pdf.cell(270, 10, titulo, ln=True, align='C')
 
-                                if df_datos.empty:
+                                if df.empty:
                                     pdf.set_font("Arial", '', 12)
-                                    pdf.cell(200, 10, txt="No hay registros en este periodo.", ln=True, align='C')
+                                    pdf.cell(270, 10, txt="No hay registros en este periodo.", ln=True, align='C')
                                     return
 
-                                # Configuración de anchos de columna (A4 tiene ~190mm de ancho útil)
-                                w_fecha, w_placa, w_cond, w_paq, w_tot = 28, 25, 82, 15, 40
+                                # Encabezados
+                                cols = ["Hora_Arribo", "Ambulancia", "Costal", "Paquetes", "Placas", "Conductor", "Monto_Final_Unidad", "Total"]
+                                pdf.set_font("Arial", 'B', 8)
+                                widths = [30, 20, 20, 15, 25, 60, 30, 30]
+                                for i, col in enumerate(cols):
+                                    pdf.cell(widths[i], 8, col, 1, 0, 'C')
+                                pdf.ln()
 
-                                # Encabezado de la tabla
-                                pdf.set_font("Arial", 'B', 9)
-                                pdf.cell(w_fecha, 8, "Fecha", 1, 0, 'C')
-                                pdf.cell(w_placa, 8, "Placas", 1, 0, 'C')
-                                pdf.cell(w_cond, 8, "Conductor", 1, 0, 'C')
-                                pdf.cell(w_paq, 8, "Paq.", 1, 0, 'C')
-                                pdf.cell(w_tot, 8, "Pago Final", 1, 1, 'C')
+                                pdf.set_font("Arial", '', 7)
+                                for _, row in df.iterrows():
+                                    # Color condicional
+                                    if row.get("Es_Ambulancia"):
+                                        pdf.set_fill_color(173, 216, 230)  # Azul
+                                    elif row.get("Es_Costal"):
+                                        pdf.set_fill_color(240, 128, 128)  # Rojo
+                                    else:
+                                        pdf.set_fill_color(255, 255, 255)
 
-                                # Filas de datos
-                                pdf.set_font("Arial", '', 8)
-                                for _, row in df_datos.iterrows():
-                                    val_f = str(row.get("Hora_Arribo", ""))[:10]
-                                    val_p = str(row.get("Placas", ""))[:10]
-                                    
-                                    # Limpiamos acentos o caracteres extraños para FPDF
-                                    val_c = str(row.get("Conductor", ""))[:45]
-                                    val_c = val_c.encode('latin-1', 'replace').decode('latin-1')
-                                    
-                                    val_pq = str(row.get("Paquetes", ""))
-                                    val_t = f"${row.get('Total', 0):,.2f}"
+                                    val_cond = str(row.get("Conductor", ""))
+                                    val_cond = val_cond.encode('latin-1', 'replace').decode('latin-1')
 
-                                    pdf.cell(w_fecha, 6, val_f, 1, 0, 'C')
-                                    pdf.cell(w_placa, 6, val_p, 1, 0, 'C')
-                                    pdf.cell(w_cond, 6, val_c, 1, 0, 'L')
-                                    pdf.cell(w_paq, 6, val_pq, 1, 0, 'C')
-                                    pdf.cell(w_tot, 6, val_t, 1, 1, 'R')
+                                    pdf.cell(widths[0], 6, str(row.get("Hora_Arribo", ""))[:16], 1, 0, 'C', fill=True)
+                                    pdf.cell(widths[1], 6, "SI" if row.get("Es_Ambulancia") else "NO", 1, 0, 'C', fill=True)
+                                    pdf.cell(widths[2], 6, "SI" if row.get("Es_Costal") else "NO", 1, 0, 'C', fill=True)
+                                    pdf.cell(widths[3], 6, str(row.get("Paquetes", "")), 1, 0, 'C', fill=True)
+                                    pdf.cell(widths[4], 6, str(row.get("Placas", "")), 1, 0, 'C', fill=True)
+                                    pdf.cell(widths[5], 6, val_cond, 1, 0, 'L', fill=True)
+                                    pdf.cell(widths[6], 6, f"${row.get('Monto_Final_Unidad', 0):,.2f}", 1, 0, 'R', fill=True)
+                                    pdf.cell(widths[7], 6, f"${row.get('Total', 0):,.2f}", 1, 1, 'R', fill=True)
 
-                            # --- PÁGINA 2: TABLA MERCADO LIBRE ---
-                            crear_tabla_pdf(df_ml, "Detalle de Viajes - MERCADO LIBRE")
+                                # Totales abajo
+                                pdf.set_font("Arial", 'B', 8)
+                                pdf.cell(sum(widths[:-1]), 8, "TOTALES", 1, 0, 'R')
+                                pdf.cell(widths[-1], 8, f"${df['Total'].sum():,.2f}", 1, 1, 'R')
 
-                            # --- PÁGINA 3: TABLA AMAZON ---
-                            crear_tabla_pdf(df_amazon, "Detalle de Viajes - AMAZON")
+                                # Resumen Unidades
+                                pdf.ln(5)
+                                en_ruta = len(df[df['Condicion'] == 'En ruta']) if 'Condicion' in df.columns else 0
+                                canceladas = len(df[df['Condicion'] == 'Cancelacion']) if 'Condicion' in df.columns else 0
+                                pdf.set_font("Arial", '', 10)
+                                pdf.cell(200, 8, f"Unidades en Ruta: {en_ruta} | Canceladas: {canceladas}", ln=True)
 
-                            # --- PÁGINA 4: RESUMEN DE NÓMINA (CONDUCTORES) ---
+                            crear_tabla_detalle(df_ml, f"{titulo_periodo} | MERCADO LIBRE")
+                            crear_tabla_detalle(df_amazon, f"{titulo_periodo} | AMAZON")
+
+                            # --- PÁGINA FINAL: RESUMEN DE NÓMINA (CONDUCTORES) ---
                             pdf.add_page()
                             pdf.set_font("Arial", 'B', 14)
-                            pdf.cell(200, 10, txt="Resumen de Nomina por Conductor", ln=True, align='C')
+                            pdf.cell(270, 10, txt="Resumen de Nomina por Conductor", ln=True, align='C')
                             pdf.ln(5)
 
                             # Agrupamos los datos usando Pandas
@@ -1027,13 +1030,13 @@ if es_admin:
 
                             if df_nomina.empty:
                                 pdf.set_font("Arial", '', 12)
-                                pdf.cell(200, 10, txt="Sin datos de conductores.", ln=True, align='C')
+                                pdf.cell(270, 10, txt="Sin datos de conductores.", ln=True, align='C')
                             else:
-                                w_cond2, w_viajes, w_pago = 90, 40, 40
-                                
-                                # Centrar la tabla
-                                margen_izq = (190 - (w_cond2 + w_viajes + w_pago)) / 2
-                                
+                                w_cond2, w_viajes, w_pago = 130, 60, 60
+
+                                # Centrar la tabla (ancho útil horizontal ~270mm)
+                                margen_izq = (270 - (w_cond2 + w_viajes + w_pago)) / 2
+
                                 pdf.set_font("Arial", 'B', 10)
                                 pdf.cell(margen_izq)
                                 pdf.cell(w_cond2, 8, "Conductor", 1, 0, 'C')
