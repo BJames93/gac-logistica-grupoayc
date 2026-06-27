@@ -835,31 +835,23 @@ if es_admin:
             
         if st.button("Generar Conciliación"):
             try:
-                # 1. Consulta a Supabase
-                res_reporte = supabase.table("registro_operacion").select("*").execute()
+                # El sistema decide qué vista consultar según el radio button
+                tabla_consultar = "vista_reporte_ayc" if es_resico else "vista_reporte_bb"
+                
+                # Consultamos la vista directa (Supabase ya hizo los cálculos)
+                res_reporte = supabase.table(tabla_consultar).select("*").execute()
                 df_rep = pd.DataFrame(res_reporte.data)
                 
                 if not df_rep.empty:
-                    df_rep["fecha_raw"] = pd.to_datetime(df_rep["hora_llegada_hub"]).dt.tz_localize(None).dt.date
+                    # Filtramos por las fechas seleccionadas en la interfaz
+                    df_rep["fecha_raw"] = pd.to_datetime(df_rep["fecha_filtro"]).dt.tz_localize(None).dt.date
                     mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
                     df_periodo = df_rep.loc[mascara_fechas].copy()
                     
+                    # Eliminamos columnas técnicas (errors="ignore" evita fallos si no existen)
+                    df_periodo = df_periodo.drop(columns=["fecha_filtro", "fecha_raw"], errors="ignore")
+                    
                     if not df_periodo.empty:
-                        # 2. CÁLCULOS FINANCIEROS DINÁMICOS
-                        if "monto_final_unidad" not in df_periodo.columns:
-                            df_periodo["monto_final_unidad"] = 1750.00 
-                            
-                        df_periodo["Subtotal"] = df_periodo["monto_final_unidad"]
-                        df_periodo["IVA"] = df_periodo["Subtotal"] * 0.16
-                        
-                        # APLICACIÓN DE RETENCIÓN SEGÚN LA EMPRESA SELECCIONADA
-                        if es_resico:
-                            df_periodo["Retencion"] = df_periodo["Subtotal"] * 0.0125
-                        else:
-                            df_periodo["Retencion"] = 0.0
-                            
-                        df_periodo["Total"] = df_periodo["Subtotal"] + df_periodo["IVA"] - df_periodo["Retencion"]
-                        
                         dia_ini = fecha_ini.strftime('%d')
                         dia_fin = fecha_fin.strftime('%d')
                         meses = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
@@ -871,7 +863,7 @@ if es_admin:
                         
                         # --- SECCIÓN 1: AMAZON ---
                         st.subheader(f"{titulo_periodo} - AMAZON")
-                        df_amazon = df_periodo[df_periodo["tipo_cliente"] == "Amazon"].copy()
+                        df_amazon = df_periodo[df_periodo["Cliente"] == "Amazon"].copy()
                         
                         if not df_amazon.empty:
                             st.dataframe(df_amazon, use_container_width=True)
@@ -879,7 +871,7 @@ if es_admin:
                             col_a1, col_a2, col_a3, col_a4 = st.columns(4)
                             col_a1.metric("Subtotal", f"${df_amazon['Subtotal'].sum():,.2f}")
                             col_a2.metric("IVA (16%)", f"${df_amazon['IVA'].sum():,.2f}")
-                            col_a3.metric("Retención", f"${df_amazon['Retencion'].sum():,.2f}")
+                            col_a3.metric("Retención", f"${df_amazon['Retencion_ISR'].sum():,.2f}")
                             col_a4.metric("Total Final", f"${df_amazon['Total'].sum():,.2f}")
                         else:
                             st.info("No hay registros de Amazon para este periodo.")
@@ -888,7 +880,7 @@ if es_admin:
                         
                         # --- SECCIÓN 2: MERCADO LIBRE ---
                         st.subheader(f"{titulo_periodo} - MERCADO LIBRE")
-                        df_ml = df_periodo[df_periodo["tipo_cliente"] == "Mercado Libre"].copy()
+                        df_ml = df_periodo[df_periodo["Cliente"] == "Mercado Libre"].copy()
                         
                         if not df_ml.empty:
                             st.dataframe(df_ml, use_container_width=True)
@@ -896,7 +888,7 @@ if es_admin:
                             col_m1, col_m2, col_m3, col_m4 = st.columns(4)
                             col_m1.metric("Subtotal", f"${df_ml['Subtotal'].sum():,.2f}")
                             col_m2.metric("IVA (16%)", f"${df_ml['IVA'].sum():,.2f}")
-                            col_m3.metric("Retención", f"${df_ml['Retencion'].sum():,.2f}")
+                            col_m3.metric("Retención", f"${df_ml['Retencion_ISR'].sum():,.2f}")
                             col_m4.metric("Total Final", f"${df_ml['Total'].sum():,.2f}")
                         else:
                             st.info("No hay registros de Mercado Libre para este periodo.")
@@ -907,7 +899,7 @@ if es_admin:
                         st.subheader(f"Gran Total del Periodo - {nombre_empresa_corte}")
                         t_sub = df_periodo['Subtotal'].sum()
                         t_iva = df_periodo['IVA'].sum()
-                        t_ret = df_periodo['Retencion'].sum()
+                        t_ret = df_periodo['Retencion_ISR'].sum()
                         t_tot = df_periodo['Total'].sum()
                         
                         st.markdown(f"""
