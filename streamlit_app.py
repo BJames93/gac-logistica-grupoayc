@@ -805,7 +805,6 @@ with tab6:
                 if btn_borrar_dev:
                     supabase.table("devoluciones").delete().eq("id", id_sel_dev).execute()
                     st.warning("🗑️ Eliminado."); st.session_state.pop("tab6_df", None); st.rerun()
-
 # ===============================================
 # NUEVA PESTAÑA: REPORTE DE CONCILIACIÓN (SECRETA)
 # ===============================================
@@ -937,9 +936,11 @@ if es_admin:
                                 df_resumen.to_excel(writer, sheet_name='Resumen Financiero', index=False)
                             return output.getvalue()
                             
-                        # 2. FUNCIÓN PARA PDF (Resumen Ejecutivo)
+                        # 2. FUNCIÓN PARA PDF (Detallado Múltiples Páginas)
                         def generar_pdf():
                             pdf = FPDF()
+                            
+                            # --- PÁGINA 1: RESUMEN GLOBAL ---
                             pdf.add_page()
                             pdf.set_font("Arial", 'B', 16)
                             pdf.cell(200, 10, txt=f"Reporte de Conciliacion - {nombre_empresa_corte}", ln=True, align='C')
@@ -959,7 +960,97 @@ if es_admin:
                             pdf.set_font("Arial", 'B', 12)
                             pdf.cell(100, 10, txt=f"TOTAL FINAL:", border=1)
                             pdf.cell(90, 10, txt=f"${t_tot:,.2f}", border=1, ln=True, align='R')
-                            
+                            pdf.ln(5)
+
+                            # Función auxiliar para pintar tablas dinámicas
+                            def crear_tabla_pdf(df_datos, titulo):
+                                pdf.add_page()
+                                pdf.set_font("Arial", 'B', 14)
+                                pdf.cell(200, 10, txt=titulo, ln=True, align='C')
+                                pdf.ln(5)
+
+                                if df_datos.empty:
+                                    pdf.set_font("Arial", '', 12)
+                                    pdf.cell(200, 10, txt="No hay registros en este periodo.", ln=True, align='C')
+                                    return
+
+                                # Configuración de anchos de columna (A4 tiene ~190mm de ancho útil)
+                                w_fecha, w_placa, w_cond, w_paq, w_tot = 28, 25, 82, 15, 40
+
+                                # Encabezado de la tabla
+                                pdf.set_font("Arial", 'B', 9)
+                                pdf.cell(w_fecha, 8, "Fecha", 1, 0, 'C')
+                                pdf.cell(w_placa, 8, "Placas", 1, 0, 'C')
+                                pdf.cell(w_cond, 8, "Conductor", 1, 0, 'C')
+                                pdf.cell(w_paq, 8, "Paq.", 1, 0, 'C')
+                                pdf.cell(w_tot, 8, "Pago Final", 1, 1, 'C')
+
+                                # Filas de datos
+                                pdf.set_font("Arial", '', 8)
+                                for _, row in df_datos.iterrows():
+                                    val_f = str(row.get("Hora_Arribo", ""))[:10]
+                                    val_p = str(row.get("Placas", ""))[:10]
+                                    
+                                    # Limpiamos acentos o caracteres extraños para FPDF
+                                    val_c = str(row.get("Conductor", ""))[:45]
+                                    val_c = val_c.encode('latin-1', 'replace').decode('latin-1')
+                                    
+                                    val_pq = str(row.get("Paquetes", ""))
+                                    val_t = f"${row.get('Total', 0):,.2f}"
+
+                                    pdf.cell(w_fecha, 6, val_f, 1, 0, 'C')
+                                    pdf.cell(w_placa, 6, val_p, 1, 0, 'C')
+                                    pdf.cell(w_cond, 6, val_c, 1, 0, 'L')
+                                    pdf.cell(w_paq, 6, val_pq, 1, 0, 'C')
+                                    pdf.cell(w_tot, 6, val_t, 1, 1, 'R')
+
+                            # --- PÁGINA 2: TABLA MERCADO LIBRE ---
+                            crear_tabla_pdf(df_ml, "Detalle de Viajes - MERCADO LIBRE")
+
+                            # --- PÁGINA 3: TABLA AMAZON ---
+                            crear_tabla_pdf(df_amazon, "Detalle de Viajes - AMAZON")
+
+                            # --- PÁGINA 4: RESUMEN DE NÓMINA (CONDUCTORES) ---
+                            pdf.add_page()
+                            pdf.set_font("Arial", 'B', 14)
+                            pdf.cell(200, 10, txt="Resumen de Nomina por Conductor", ln=True, align='C')
+                            pdf.ln(5)
+
+                            # Agrupamos los datos usando Pandas
+                            df_nomina = df_periodo.groupby("Conductor").agg(
+                                Viajes=('Conductor', 'count'),
+                                Pago_Neta=('Total', 'sum')
+                            ).reset_index()
+
+                            # Ordenamos de mayor a menor ingreso
+                            df_nomina = df_nomina.sort_values(by="Pago_Neta", ascending=False)
+
+                            if df_nomina.empty:
+                                pdf.set_font("Arial", '', 12)
+                                pdf.cell(200, 10, txt="Sin datos de conductores.", ln=True, align='C')
+                            else:
+                                w_cond2, w_viajes, w_pago = 90, 40, 40
+                                
+                                # Centrar la tabla
+                                margen_izq = (190 - (w_cond2 + w_viajes + w_pago)) / 2
+                                
+                                pdf.set_font("Arial", 'B', 10)
+                                pdf.cell(margen_izq)
+                                pdf.cell(w_cond2, 8, "Conductor", 1, 0, 'C')
+                                pdf.cell(w_viajes, 8, "Total Viajes", 1, 0, 'C')
+                                pdf.cell(w_pago, 8, "Nómina a Pagar", 1, 1, 'C')
+
+                                pdf.set_font("Arial", '', 9)
+                                for _, row in df_nomina.iterrows():
+                                    val_c = str(row["Conductor"]).encode('latin-1', 'replace').decode('latin-1')
+                                    val_v = str(row["Viajes"])
+                                    val_p = f"${row['Pago_Neta']:,.2f}"
+
+                                    pdf.cell(margen_izq)
+                                    pdf.cell(w_cond2, 7, val_c, 1, 0, 'L')
+                                    pdf.cell(w_viajes, 7, val_v, 1, 0, 'C')
+                                    pdf.cell(w_pago, 7, val_p, 1, 1, 'R')
+
                             return pdf.output(dest='S').encode('latin1')
 
                         # Botones de descarga
@@ -972,9 +1063,9 @@ if es_admin:
                             )
                         with col_btn2:
                             st.download_button(
-                                label="📄 Descargar Resumen en PDF",
+                                label="📄 Descargar Resumen Detallado PDF",
                                 data=generar_pdf(),
-                                file_name=f"Resumen_{nombre_empresa_corte}_Semana{semana_corte}.pdf",
+                                file_name=f"Reporte_Detallado_{nombre_empresa_corte}_Semana{semana_corte}.pdf",
                                 mime="application/pdf"
                             )
                             
