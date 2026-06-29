@@ -806,6 +806,7 @@ with tab6:
                     supabase.table("devoluciones").delete().eq("id", id_sel_dev).execute()
                     st.warning("🗑️ Eliminado."); st.session_state.pop("tab6_df", None); st.rerun()
 
+
 # ===============================================
 # NUEVA PESTAÑA: REPORTE DE CONCILIACIÓN (SECRETA)
 # ===============================================
@@ -857,12 +858,12 @@ if es_admin:
                         meses = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
                         mes_texto = meses[fecha_fin.month]
                         
-                        titulo_periodo = f"CORTE {dia_ini} AL {dia_fin} DE {mes_texto} SEMANA {semana_corte}"
+                        titulo_periodo = f"Corte {dia_ini} al {dia_fin} de {mes_texto} | Semana {semana_corte}"
                         
                         st.divider()
                         
                         # --- SECCIÓN 1: AMAZON ---
-                        st.subheader(f"{titulo_periodo} - AMAZON")
+                        st.subheader(f"{titulo_periodo} | Amazon")
                         df_amazon = df_periodo[df_periodo["Cliente"] == "Amazon"].copy()
                         
                         if not df_amazon.empty:
@@ -879,7 +880,7 @@ if es_admin:
                         st.divider()
                         
                         # --- SECCIÓN 2: MERCADO LIBRE ---
-                        st.subheader(f"{titulo_periodo} - MERCADO LIBRE")
+                        st.subheader(f"{titulo_periodo} | Mercado Libre")
                         df_ml = df_periodo[df_periodo["Cliente"] == "Mercado Libre"].copy()
                         
                         if not df_ml.empty:
@@ -937,10 +938,11 @@ if es_admin:
                                 df_resumen.to_excel(writer, sheet_name='Resumen Financiero', index=False)
                             return output.getvalue()
                             
-                        # 2. FUNCIÓN PARA PDF (Hoja 1: Resumen Global | Hoja 2: Detalle completo)
+                        # 2. FUNCIÓN PARA PDF (Hoja 1: Resumen Global | Hoja 2+: Detalle completo continuo)
                         def generar_pdf():
                             pdf = FPDF(orientation='L', unit='mm', format='A4')  # Orientación horizontal
-                            ANCHO_UTIL = 277  # ancho útil aproximado en A4 horizontal con márgenes default
+                            pdf.set_auto_page_break(auto=True, margin=15)
+                            ANCHO_UTIL = 277  # ancho útil aproximado en A4 horizontal
 
                             # =========================================================
                             # HOJA 1: RESUMEN GLOBAL
@@ -961,12 +963,11 @@ if es_admin:
                                 pdf.cell(50, 10, f"${val:,.2f}", border=1, ln=True, align='R')
 
                             # =========================================================
-                            # HOJA 2: TODO EL DETALLE (Amazon + Salarios + ML + Salarios + Resumen Unidades)
+                            # HOJA 2: INICIO DE DATOS DETALLADOS (Flujo continuo)
                             # =========================================================
                             pdf.add_page()
 
-                            # Definición de columnas para la tabla grande (18 columnas)
-                            # clave_df, encabezado, ancho_mm, alineacion
+                            # Definición de columnas para la tabla grande (19 columnas solicitadas)
                             columnas_tabla = [
                                 ("Hora_Arribo",         "Hora Arribo",   16, 'C'),
                                 ("Ambulancia",          "Ambul.",        10, 'C'),
@@ -976,10 +977,10 @@ if es_admin:
                                 ("Condicion",           "Condicion",     16, 'C'),
                                 ("Placas",              "Placas",        14, 'C'),
                                 ("Tipo",                "Tipo",          12, 'C'),
-                                ("Marca",               "Marca",         14, 'L'),
+                                ("Marca_del_Vehiculo",  "Marca",         14, 'L'),
                                 ("Conductor",           "Conductor",     28, 'L'),
                                 ("Cliente",             "Cliente",       14, 'C'),
-                                ("Monto_Unidad",        "Monto Unid.",   15, 'R'),
+                                ("Monto_por_Unidad",    "Monto Unid.",   15, 'R'),
                                 ("Monto_Final_Unidad",  "Monto Final",   15, 'R'),
                                 ("Costo_IMSS",          "Costo IMSS",    14, 'R'),
                                 ("Subtotal",            "Subtotal",      14, 'R'),
@@ -997,19 +998,17 @@ if es_admin:
                                 """Formatea el valor según el tipo de columna."""
                                 if clave == "__SEMANA__":
                                     return str(semana_corte)
-                                if clave in ("Ambulancia",):
+                                if clave in ("Ambulancia", "Costal", "Es_Ambulancia", "Es_Costal"):
                                     return "SI" if valor else "NO"
-                                if clave in ("Costal",):
-                                    return "SI" if valor else "NO"
-                                if clave in ("Monto_Unidad", "Monto_Final_Unidad", "Costo_IMSS", "Subtotal", "IVA", "Retencion_ISR", "Total"):
+                                if clave in ("Monto_por_Unidad", "Monto_Final_Unidad", "Costo_IMSS", "Subtotal", "IVA", "Retencion_ISR", "Total"):
                                     try:
                                         return f"${float(valor or 0):,.2f}"
                                     except (ValueError, TypeError):
                                         return "$0.00"
                                 if clave == "Hora_Arribo":
                                     return str(valor)[:16]
+                                
                                 texto = str(valor) if valor is not None else ""
-                                # Saneamos acentos/ñ para FPDF clásico (latin-1)
                                 return texto.encode('latin-1', 'replace').decode('latin-1')
 
                             def pintar_encabezado_tabla():
@@ -1020,14 +1019,14 @@ if es_admin:
                                 pdf.ln()
 
                             def pintar_tabla_detalle(df, titulo_tabla):
-                                pdf.set_font("Arial", 'B', 13)
-                                pdf.cell(ANCHO_UTIL, 8, titulo_tabla, ln=True, align='C')
+                                pdf.set_font("Arial", 'B', 12)
+                                pdf.cell(ANCHO_UTIL, 8, titulo_tabla, ln=True, align='L')
                                 pdf.ln(1)
 
                                 if df.empty:
                                     pdf.set_font("Arial", '', 10)
-                                    pdf.cell(ANCHO_UTIL, 8, "No hay registros en este periodo.", ln=True, align='C')
-                                    pdf.ln(3)
+                                    pdf.cell(ANCHO_UTIL, 8, "No hay registros en este periodo.", ln=True, align='L')
+                                    pdf.ln(5)
                                     return
 
                                 pintar_encabezado_tabla()
@@ -1035,9 +1034,12 @@ if es_admin:
 
                                 for _, row in df.iterrows():
                                     # Color condicional: Costal = rojo claro, Ambulancia = azul claro
-                                    if row.get("Ambulancia"):
+                                    es_amb = row.get("Ambulancia") or row.get("Es_Ambulancia")
+                                    es_cos = row.get("Costal") or row.get("Es_Costal")
+                                    
+                                    if es_amb:
                                         pdf.set_fill_color(173, 216, 230)  # Azul claro
-                                    elif row.get("Costal"):
+                                    elif es_cos:
                                         pdf.set_fill_color(255, 200, 200)  # Rojo claro
                                     else:
                                         pdf.set_fill_color(255, 255, 255)
@@ -1048,45 +1050,44 @@ if es_admin:
                                         pdf.cell(ancho, ALTO_FILA, texto, 1, 0, alineacion, fill=True)
                                     pdf.ln()
 
-                                # --- Totales por columna (Monto_Unidad -> Total) ---
+                                # --- Totales por columna ---
                                 pdf.set_font("Arial", 'B', FS_DATA)
-                                columnas_suma = ["Monto_Unidad", "Monto_Final_Unidad", "Costo_IMSS", "Subtotal", "IVA", "Retencion_ISR", "Total"]
-                                # Ancho acumulado de las columnas previas a las que se suman (todo lo que no se suma)
-                                ancho_label = sum(a for c, h, a, al in columnas_tabla if c not in columnas_suma)
+                                columnas_suma = ["Monto_por_Unidad", "Monto_Final_Unidad", "Costo_IMSS", "Subtotal", "IVA", "Retencion_ISR", "Total"]
+                                ancho_label = sum(a for c, h, a, al in columnas_tabla if c not in columnas_suma and c != "__SEMANA__")
                                 pdf.cell(ancho_label, 6, "TOTALES", 1, 0, 'R', fill=True)
                                 pdf.set_fill_color(230, 230, 230)
+                                
                                 for clave, header, ancho, alineacion in columnas_tabla:
                                     if clave in columnas_suma:
                                         total_col = pd.to_numeric(df[clave], errors='coerce').sum() if clave in df.columns else 0
                                         pdf.cell(ancho, 6, f"${total_col:,.2f}", 1, 0, 'R', fill=True)
+                                    elif clave == "__SEMANA__":
+                                        pdf.cell(ancho, 6, "", 1, 0, 'C', fill=True) # Espacio vacío bajo la semana
                                 pdf.ln(8)
 
                             def pintar_tabla_salarios(df, titulo_tabla):
                                 pdf.set_font("Arial", 'B', 11)
-                                pdf.cell(ANCHO_UTIL, 7, titulo_tabla, ln=True, align='C')
+                                pdf.cell(ANCHO_UTIL, 7, titulo_tabla, ln=True, align='L')
                                 pdf.ln(1)
 
                                 if df.empty or "Conductor" not in df.columns:
                                     pdf.set_font("Arial", '', 9)
-                                    pdf.cell(ANCHO_UTIL, 6, "Sin datos de conductores.", ln=True, align='C')
-                                    pdf.ln(3)
+                                    pdf.cell(ANCHO_UTIL, 6, "Sin datos de conductores.", ln=True, align='L')
+                                    pdf.ln(5)
                                     return
 
-                                # Agrupamos por conductor, tomando Banco/Clabe (primer valor) y suma de Costo_IMSS
+                                # Agrupamos por conductor y sumamos SOLO el Costo_IMSS para el salario base
                                 agg_dict = {"Costo_IMSS": "sum"}
-                                if "Banco" in df.columns:
-                                    agg_dict["Banco"] = "first"
-                                if "Clabe" in df.columns:
-                                    agg_dict["Clabe"] = "first"
+                                if "Banco" in df.columns: agg_dict["Banco"] = "first"
+                                if "Cuenta_clabe" in df.columns: agg_dict["Cuenta_clabe"] = "first"
+                                elif "cuenta_clabe" in df.columns: agg_dict["cuenta_clabe"] = "first"
 
                                 df_sal = df.groupby("Conductor").agg(agg_dict).reset_index()
                                 df_sal = df_sal.sort_values(by="Conductor")
 
                                 w_cond, w_banco, w_clabe, w_sal = 70, 50, 45, 40
-                                margen_izq = (ANCHO_UTIL - (w_cond + w_banco + w_clabe + w_sal)) / 2
 
                                 pdf.set_font("Arial", 'B', 9)
-                                pdf.cell(margen_izq)
                                 pdf.set_fill_color(220, 220, 220)
                                 pdf.cell(w_cond, 7, "Conductor", 1, 0, 'C', fill=True)
                                 pdf.cell(w_banco, 7, "Banco", 1, 0, 'C', fill=True)
@@ -1098,25 +1099,26 @@ if es_admin:
                                 for _, row in df_sal.iterrows():
                                     val_c = str(row["Conductor"]).encode('latin-1', 'replace').decode('latin-1')
                                     val_b = str(row.get("Banco", "") or "").encode('latin-1', 'replace').decode('latin-1')
-                                    val_cl = str(row.get("Clabe", "") or "")
+                                    
+                                    # Intentar leer ambas nomenclaturas de Clabe por si acaso
+                                    val_cl = str(row.get("Cuenta_clabe", row.get("cuenta_clabe", "")))
+                                    
                                     val_s = float(row.get("Costo_IMSS", 0) or 0)
                                     total_salario += val_s
 
-                                    pdf.cell(margen_izq)
                                     pdf.cell(w_cond, 6, val_c, 1, 0, 'L')
                                     pdf.cell(w_banco, 6, val_b, 1, 0, 'L')
                                     pdf.cell(w_clabe, 6, val_cl, 1, 0, 'C')
                                     pdf.cell(w_sal, 6, f"${val_s:,.2f}", 1, 1, 'R')
 
                                 pdf.set_font("Arial", 'B', 8)
-                                pdf.cell(margen_izq)
                                 pdf.cell(w_cond + w_banco + w_clabe, 6, "TOTAL A DEPOSITAR", 1, 0, 'R')
                                 pdf.cell(w_sal, 6, f"${total_salario:,.2f}", 1, 1, 'R')
-                                pdf.ln(6)
+                                pdf.ln(8)
 
                             def pintar_resumen_unidades(df, titulo_tabla):
                                 pdf.set_font("Arial", 'B', 11)
-                                pdf.cell(ANCHO_UTIL, 7, titulo_tabla, ln=True, align='C')
+                                pdf.cell(ANCHO_UTIL, 7, titulo_tabla, ln=True, align='L')
                                 pdf.ln(1)
 
                                 if df.empty or "Condicion" not in df.columns:
@@ -1125,29 +1127,26 @@ if es_admin:
                                     en_ruta = len(df[df['Condicion'] == 'En ruta'])
                                     canceladas = len(df[df['Condicion'] == 'Cancelacion'])
 
-                                w_label, w_val = 90, 40
-                                margen_izq = (ANCHO_UTIL - (w_label + w_val)) / 2
+                                w_label, w_val = 60, 30
 
                                 pdf.set_font("Arial", '', 9)
-                                pdf.cell(margen_izq)
                                 pdf.set_fill_color(173, 216, 230)
                                 pdf.cell(w_label, 6, "Unidades en Ruta", 1, 0, 'L', fill=True)
                                 pdf.cell(w_val, 6, str(en_ruta), 1, 1, 'C', fill=True)
 
-                                pdf.cell(margen_izq)
                                 pdf.set_fill_color(255, 200, 200)
                                 pdf.cell(w_label, 6, "Unidades Canceladas", 1, 0, 'L', fill=True)
                                 pdf.cell(w_val, 6, str(canceladas), 1, 1, 'C', fill=True)
-                                pdf.ln(6)
+                                pdf.ln(15)
 
                             # --- BLOQUE AMAZON ---
-                            titulo_amazon = f"Corte {dia_ini} al {dia_fin} de {mes_texto} | Semana {semana_corte} | Amazon"
+                            titulo_amazon = f"{titulo_periodo} | Amazon"
                             pintar_tabla_detalle(df_amazon, titulo_amazon)
                             pintar_tabla_salarios(df_amazon, f"Salario minimo choferes Amazon | Semana {semana_corte}")
                             pintar_resumen_unidades(df_amazon, f"Resumen de Unidades | Amazon | Semana {semana_corte}")
 
                             # --- BLOQUE MERCADO LIBRE ---
-                            titulo_ml = f"Corte {dia_ini} al {dia_fin} de {mes_texto} | Semana {semana_corte} | Mercado Libre"
+                            titulo_ml = f"{titulo_periodo} | Mercado Libre"
                             pintar_tabla_detalle(df_ml, titulo_ml)
                             pintar_tabla_salarios(df_ml, f"Salario minimo choferes Mercado Libre | Semana {semana_corte}")
                             pintar_resumen_unidades(df_ml, f"Resumen de Unidades | Mercado Libre | Semana {semana_corte}")
