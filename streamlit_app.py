@@ -849,6 +849,9 @@ if es_admin:
                     mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
                     df_periodo = df_rep.loc[mascara_fechas].copy()
                     
+                    # Guardamos la fecha con formato de día para la matriz antes de eliminar la columna técnica
+                    df_periodo["Dia_Semana"] = pd.to_datetime(df_periodo["fecha_filtro"]).dt.strftime('%A')
+                    
                     # Eliminamos columnas técnicas (errors="ignore" evita fallos si no existen)
                     df_periodo = df_periodo.drop(columns=["fecha_filtro", "fecha_raw"], errors="ignore")
                     
@@ -881,7 +884,7 @@ if es_admin:
                         
                         # --- SECCIÓN 2: MERCADO LIBRE ---
                         st.subheader(f"{titulo_periodo} | Mercado Libre")
-                        df_ml = df_periodo[df_periodo["Cliente"] == "Mercado Libre"].copy()
+                        df_ml = df_periodo[df_periodo["Cliente"] == "Marketplace" if "Cliente" in df_periodo.columns and False else df_periodo["Cliente"] == "Mercado Libre"].copy()
                         
                         if not df_ml.empty:
                             st.dataframe(df_ml, use_container_width=True)
@@ -930,6 +933,59 @@ if es_admin:
                             * **Servicios de Ambulancia:** {total_ambulancias}
                             * **Servicios de Costales:** {total_costales}
                             """)
+
+                        # --- NUEVO CÓDIGO: MATRIZ DE SERVICIOS POR DÍA DE LA SEMANA ---
+                        st.write("---")
+                        st.subheader("📅 Distribución Estructurada de Servicios por Día")
+                        
+                        # Clasificamos cada registro en su categoría exclusiva
+                        def clasificar_servicio(row):
+                            if row.get("Es_Ambulancia") == True:
+                                return "Ambulancia"
+                            elif row.get("Es_Costal") == True:
+                                return "Costal"
+                            else:
+                                tipo = str(row.get("Tipo", "")).upper()
+                                if "SMALL" in tipo:
+                                    return "Small"
+                                elif "LARGE" in tipo:
+                                    return "Large"
+                            return "Otros"
+
+                        df_periodo["Categoria_Servicio"] = df_periodo.apply(clasificar_servicio, axis=1)
+
+                        # Mapeo de días en inglés a español para el ordenamiento correcto de las columnas
+                        dias_ordenados = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                        dias_espanol = {
+                            "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles", 
+                            "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"
+                        }
+                        
+                        # Categorías fijas de filas
+                        categorias_filas = ["Small", "Large", "Ambulancia", "Costal", "Otros"]
+
+                        # Creamos tabla pivote cruzada
+                        if not df_periodo.empty:
+                            matriz_pivot = pd.crosstab(
+                                index=df_periodo["Categoria_Servicio"],
+                                columns=df_periodo["Dia_Semana"]
+                            )
+                            
+                            # Reindexamos columnas y filas para garantizar consistencia y orden cronológico
+                            matriz_pivot = matriz_pivot.reindex(index=categorias_filas, columns=dias_ordenados, fill_value=0)
+                            # Renombramos las columnas a español
+                            matriz_pivot = matriz_pivot.rename(columns=dias_espanol)
+                            
+                            # Removemos la fila 'Otros' si quedó completamente en ceros para limpiar el diseño
+                            if matriz_pivot.loc["Otros"].sum() == 0:
+                                matriz_pivot = matriz_pivot.drop(index="Otros")
+
+                            # Agregamos totales de filas y columnas
+                            matriz_pivot["Total General"] = matriz_pivot.sum(axis=1)
+                            matriz_pivot.loc["TOTAL SERVICIOS"] = matriz_pivot.sum(axis=0)
+                            
+                            # Desplegar la tabla estructurada en la app
+                            st.dataframe(matriz_pivot, use_container_width=True)
                         
                         # ==========================================
                         # MÓDULO DE EXPORTACIÓN (EXCEL Y PDF)
@@ -1059,7 +1115,6 @@ if es_admin:
                                 pdf.set_font("Arial", '', FS_DATA)
 
                                 for _, row in df.iterrows():
-                                    # Color condicional: Costal = rojo claro, Ambulancia = azul claro
                                     es_amb = row.get("Ambulancia") or row.get("Es_Ambulancia")
                                     es_cos = row.get("Costal") or row.get("Es_Costal")
                                     
