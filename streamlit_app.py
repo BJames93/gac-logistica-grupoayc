@@ -896,19 +896,40 @@ if es_admin:
                             
                         st.divider()
                         
-                        # --- GRAN TOTAL ---
+                        # --- GRAN TOTAL Y RESUMEN DE SERVICIOS ---
                         st.subheader(f"Gran Total del Periodo - {nombre_empresa_corte}")
                         t_sub = df_periodo['Subtotal'].sum()
                         t_iva = df_periodo['IVA'].sum()
                         t_ret = df_periodo['Retencion_ISR'].sum()
                         t_tot = df_periodo['Total'].sum()
                         
-                        st.markdown(f"""
-                        * **SUBTOTAL:** ${t_sub:,.2f}
-                        * **IVA:** ${t_iva:,.2f}
-                        * **RETENCIÓN:** ${t_ret:,.2f}
-                        * **TOTAL FINAL:** **${t_tot:,.2f}**
-                        """)
+                        # Métricas operativas calculadas dinámicamente
+                        total_servicios = len(df_periodo)
+                        total_small = len(df_periodo[df_periodo['Tipo'].astype(str).str.upper() == 'SMALL'])
+                        total_large = len(df_periodo[df_periodo['Tipo'].astype(str).str.upper() == 'LARGE'])
+                        total_ambulancias = len(df_periodo[df_periodo['Es_Ambulancia'] == True])
+                        total_costales = len(df_periodo[df_periodo['Es_Costal'] == True])
+                        
+                        col_fin, col_ope = st.columns(2)
+                        
+                        with col_fin:
+                            st.markdown("**Desglose Financiero Global:**")
+                            st.markdown(f"""
+                            * **SUBTOTAL:** ${t_sub:,.2f}
+                            * **IVA:** ${t_iva:,.2f}
+                            * **RETENCIÓN:** ${t_ret:,.2f}
+                            * **TOTAL FINAL:** **${t_tot:,.2f}**
+                            """)
+                            
+                        with col_ope:
+                            st.markdown("**Resumen Operativo de Servicios:**")
+                            st.markdown(f"""
+                            * **Total de Servicios:** {total_servicios} viajes
+                            * **Unidades Small:** {total_small}
+                            * **Unidades Large:** {total_large}
+                            * **Servicios de Ambulancia:** {total_ambulancias}
+                            * **Servicios de Costales:** {total_costales}
+                            """)
                         
                         # ==========================================
                         # MÓDULO DE EXPORTACIÓN (EXCEL Y PDF)
@@ -933,7 +954,12 @@ if es_admin:
                                     "Subtotal Total": t_sub,
                                     "IVA Total": t_iva,
                                     "Retencion Total": t_ret,
-                                    "Total Final": t_tot
+                                    "Total Final": t_tot,
+                                    "Total Servicios": total_servicios,
+                                    "Total Small": total_small,
+                                    "Total Large": total_large,
+                                    "Total Ambulancias": total_ambulancias,
+                                    "Total Costales": total_costales
                                 }])
                                 df_resumen.to_excel(writer, sheet_name='Resumen Financiero', index=False)
                             return output.getvalue()
@@ -1062,7 +1088,7 @@ if es_admin:
                                         total_col = pd.to_numeric(df[clave], errors='coerce').sum() if clave in df.columns else 0
                                         pdf.cell(ancho, 6, f"${total_col:,.2f}", 1, 0, 'R', fill=True)
                                     elif clave == "__SEMANA__":
-                                        pdf.cell(ancho, 6, "", 1, 0, 'C', fill=True) # Espacio vacío bajo la semana
+                                        pdf.cell(ancho, 6, "", 1, 0, 'C', fill=True) 
                                 pdf.ln(8)
 
                             def pintar_tabla_salarios(df, titulo_tabla):
@@ -1076,7 +1102,6 @@ if es_admin:
                                     pdf.ln(5)
                                     return
 
-                                # Agrupamos por conductor y sumamos SOLO el Costo_IMSS para el salario base
                                 agg_dict = {"Costo_IMSS": "sum"}
                                 if "Banco" in df.columns: agg_dict["Banco"] = "first"
                                 if "Cuenta_clabe" in df.columns: agg_dict["Cuenta_clabe"] = "first"
@@ -1099,10 +1124,7 @@ if es_admin:
                                 for _, row in df_sal.iterrows():
                                     val_c = str(row["Conductor"]).encode('latin-1', 'replace').decode('latin-1')
                                     val_b = str(row.get("Banco", "") or "").encode('latin-1', 'replace').decode('latin-1')
-                                    
-                                    # Intentar leer ambas nomenclaturas de Clabe por si acaso
                                     val_cl = str(row.get("Cuenta_clabe", row.get("cuenta_clabe", "")))
-                                    
                                     val_s = float(row.get("Costo_IMSS", 0) or 0)
                                     total_salario += val_s
 
