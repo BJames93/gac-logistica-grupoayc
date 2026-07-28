@@ -810,6 +810,10 @@ with tab6:
 # ===============================================
 # NUEVA PESTAÑA: REPORTE DE CONCILIACIÓN (SECRETA)
 # ===============================================
+
+# liga para admin
+# https://gac-logistica-grupoayc-i9ukfmgrbphz7gqqvvojzr.streamlit.app/?admin=AyC2026
+
 if es_admin:
     with tab_reporte: 
         st.header("📊 Reporte de Conciliación y Facturación")
