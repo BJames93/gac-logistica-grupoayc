@@ -813,7 +813,6 @@ with tab6:
 
 # liga para admin
 # https://gac-logistica-grupoayc-i9ukfmgrbphz7gqqvvojzr.streamlit.app/?admin=AyC2026
-
 if es_admin:
     with tab_reporte: 
         st.header("📊 Reporte de Conciliación y Facturación")
@@ -849,7 +848,7 @@ if es_admin:
                 df_tarifas = pd.DataFrame(res_tarifas.data)
                 
                 if not df_rep.empty:
-                    # Normalización de fechas del reporte por hora real de arribo
+                    # Normalización de fechas del reporte por hora de arribo o fecha de captura
                     df_rep["fecha_raw"] = pd.to_datetime(df_rep["Hora_Arribo"].fillna(df_rep["fecha_filtro"])).dt.date
                     mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
                     df_periodo = df_rep.loc[mascara_fechas].copy()
@@ -879,51 +878,58 @@ if es_admin:
                         else:
                             df_t = pd.DataFrame()
 
-                        # 2. FUNCIÓN DE ASIGNACIÓN JERÁRQUICA DE TARIFAS
+                        # 2. FUNCIÓN DE ASIGNACIÓN JERÁRQUICA DE TARIFAS (VERSIÓN DEFINITIVA)
                         def determinar_monto(row):
+                            # Normalizar flags de ambulancia y costal tolerando nulos/NaN
+                            es_costal = str(row.get("Es_Costal")).strip().lower() in ["true", "1", "t"]
+                            es_ambulancia = str(row.get("Es_Ambulancia")).strip().lower() in ["true", "1", "t"]
+
                             # Regla 1: Costal ($900.00 fijo)
-                            if str(row.get("Es_Costal")).upper() == "TRUE":
+                            if es_costal:
                                 return 900.0
                             
                             # Regla 2: Ambulancia (monto variable capturado)
-                            if str(row.get("Es_Ambulancia")).upper() == "TRUE":
+                            if es_ambulancia:
                                 val_amb = row.get("costo_ambulancia_variable")
                                 try:
-                                    return float(val_amb) if val_amb is not None else 0.0
+                                    if pd.notna(val_amb) and float(val_amb) > 0:
+                                        return float(val_amb)
                                 except (ValueError, TypeError):
-                                    return 0.0
+                                    pass
+                                return 0.0
 
-                            # Búsqueda flexible por palabras clave principales ('AYC' o 'BOULDER')
+                            # Datos para búsqueda en catálogo de Tarifas
                             kw_empresa = "AYC" if es_resico else "BOULDER"
                             cliente_val = str(row.get("Cliente", "")).strip().upper()
                             placa_val = str(row.get("Placas", "")).strip().upper()
                             tipo_val = str(row.get("Tipo", "")).strip().upper()
-                            fecha_serv = row.get("fecha_raw")
+                            fecha_raw_val = row.get("fecha_raw")
 
-                            if df_t.empty:
+                            if df_t.empty or cliente_val in ["", "NONE", "NAN"]:
                                 return 0.0
 
                             # Filtro base flexible por Empresa, Cliente y Vigencia
                             filtro_base = (
                                 (df_t["empresa_norm"].str.contains(kw_empresa, na=False)) &
                                 (df_t["cliente_norm"] == cliente_val) &
-                                (df_t["f_ini"] <= fecha_serv) &
-                                (df_t["f_fin"] >= fecha_serv)
+                                (df_t["f_ini"] <= fecha_raw_val) &
+                                (df_t["f_fin"] >= fecha_raw_val)
                             )
                             df_candidatas = df_t.loc[filtro_base]
 
                             if df_candidatas.empty:
                                 return 0.0
 
-                            # Prioridad 3: Búsqueda específica por PLACA
-                            match_placa = df_candidatas[df_candidatas["placa_norm"] == placa_val]
-                            if not match_placa.empty:
-                                return float(match_placa.iloc[0]["monto"])
+                            # Prioridad 3: Coincidencia específica por PLACA
+                            if placa_val not in ["", "NONE", "NAN"]:
+                                match_placa = df_candidatas[df_candidatas["placa_norm"] == placa_val]
+                                if not match_placa.empty:
+                                    return float(match_placa.iloc[0]["monto"])
 
-                            # Prioridad 4: Búsqueda general por TIPO DE UNIDAD
+                            # Prioridad 4: Coincidencia general por TIPO DE UNIDAD (donde no hay placa asignada)
                             match_tipo = df_candidatas[
                                 (df_candidatas["tipo_norm"] == tipo_val) & 
-                                (df_candidatas["placa"].isna() | (df_candidatas["placa_norm"] == "NONE") | (df_candidatas["placa_norm"] == "NAN") | (df_candidatas["placa_norm"] == ""))
+                                (df_candidatas["placa_norm"].isin(["", "NONE", "NAN"]) | df_candidatas["placa"].isna())
                             ]
                             if not match_tipo.empty:
                                 return float(match_tipo.iloc[0]["monto"])
