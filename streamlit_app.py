@@ -849,7 +849,7 @@ if es_admin:
                 df_tarifas = pd.DataFrame(res_tarifas.data)
                 
                 if not df_rep.empty:
-                    # Normalización de fechas del reporte
+                    # Normalización de fechas del reporte por hora real de arribo
                     df_rep["fecha_raw"] = pd.to_datetime(df_rep["Hora_Arribo"].fillna(df_rep["fecha_filtro"])).dt.date
                     mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
                     df_periodo = df_rep.loc[mascara_fechas].copy()
@@ -893,8 +893,8 @@ if es_admin:
                                 except (ValueError, TypeError):
                                     return 0.0
 
-                            # Datos para búsqueda en catálogo de Tarifas
-                            empresa_target = "GRUPOAYC" if es_resico else "BOULDERBRWN"
+                            # Búsqueda flexible por palabras clave principales ('AYC' o 'BOULDER')
+                            kw_empresa = "AYC" if es_resico else "BOULDER"
                             cliente_val = str(row.get("Cliente", "")).strip().upper()
                             placa_val = str(row.get("Placas", "")).strip().upper()
                             tipo_val = str(row.get("Tipo", "")).strip().upper()
@@ -903,8 +903,9 @@ if es_admin:
                             if df_t.empty:
                                 return 0.0
 
+                            # Filtro base flexible por Empresa, Cliente y Vigencia
                             filtro_base = (
-                                (df_t["empresa_norm"].str.contains(empresa_target)) &
+                                (df_t["empresa_norm"].str.contains(kw_empresa, na=False)) &
                                 (df_t["cliente_norm"] == cliente_val) &
                                 (df_t["f_ini"] <= fecha_serv) &
                                 (df_t["f_fin"] >= fecha_serv)
