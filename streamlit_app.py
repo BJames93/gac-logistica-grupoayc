@@ -840,392 +840,169 @@ if es_admin:
             
         if st.button("Generar Conciliación"):
             try:
-                # El sistema decide qué vista consultar según el radio button
+                # 1. Consultar Vistas y Tabla Tarifas
                 tabla_consultar = "vista_reporte_ayc" if es_resico else "vista_reporte_bb"
-                
-                # Consultamos la vista directa (Supabase resuelve asignación por Placa > Tipo de Unidad)
                 res_reporte = supabase.table(tabla_consultar).select("*").execute()
+                res_tarifas = supabase.table("tarifas").select("*").execute()
+                
                 df_rep = pd.DataFrame(res_reporte.data)
+                df_tarifas = pd.DataFrame(res_tarifas.data)
                 
                 if not df_rep.empty:
-                    # Filtramos por las fechas seleccionadas en la interfaz
-                    df_rep["fecha_raw"] = pd.to_datetime(df_rep["fecha_filtro"]).dt.tz_localize(None).dt.date
+                    # Normalización de fechas para filtrado
+                    df_rep["fecha_raw"] = pd.to_datetime(df_rep["Hora_Arribo"].fillna(df_rep["fecha_filtro"])).dt.date
                     mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
                     df_periodo = df_rep.loc[mascara_fechas].copy()
                     
-                    # Guardamos la fecha con formato de día para la matriz antes de eliminar la columna técnica
-                    df_periodo["Dia_Semana"] = pd.to_datetime(df_periodo["fecha_filtro"]).dt.strftime('%A')
-                    
-                    # Eliminamos columnas técnicas (errors="ignore" evita fallos si no existen)
-                    df_periodo = df_periodo.drop(columns=["fecha_filtro", "fecha_raw"], errors="ignore")
-                    
                     if not df_periodo.empty:
+                        # 2. FUNCIÓN DE ASIGNACIÓN JERÁRQUICA DE TARIFAS
+                        def determinar_monto(row):
+                            # Regla 1: Costal
+                            if str(row.get("Es_Costal")).upper() == "TRUE":
+                                return 900.0
+                            
+                            # Regla 2: Ambulancia
+                            if str(row.get("Es_Ambulancia")).upper() == "TRUE":
+                                val_amb = row.get("costo_ambulancia_variable")
+                                try:
+                                    return float(val_amb) if val_amb is not None else 0.0
+                                except (ValueError, TypeError):
+                                    return 0.0
+
+                            # Datos para búsqueda en tabla Tarifas
+                            empresa_target = "GRUPOAYC" if es_resico else "BOULDERBRWN"
+                            cliente_val = str(row.get("Cliente", "")).strip().upper()
+                            placa_val = str(row.get("Placas", "")).strip().upper()
+                            tipo_val = str(row.get("Tipo", "")).strip().upper()
+                            fecha_serv = row.get("fecha_raw")
+
+                            if df_tarifas.empty:
+                                return 0.0
+
+                            # Filtrar catálogo de tarifas por Empresa, Cliente y Vigencia
+                            df_t = df_tarifas.copy()
+                            df_t["empresa_norm"] = df_t["nombre_empresa"].astype(str).str.replace(" ", "").str.upper()
+                            df_t["cliente_norm"] = df_t["tipo_cliente"].astype(str).str.strip().str.upper()
+                            df_t["placa_norm"] = df_t["placa"].astype(str).str.strip().str.upper()
+                            df_t["tipo_norm"] = df_t["tipo_unidad"].astype(str).str.strip().str.upper()
+                            df_t["f_ini"] = pd.to_datetime(df_t["fecha_inicio"]).dt.date
+                            df_t["f_fin"] = pd.to_datetime(df_t["fecha_fin"]).dt.date
+
+                            filtro_base = (
+                                (df_t["empresa_norm"].str.contains(empresa_target)) &
+                                (df_t["cliente_norm"] == cliente_val) &
+                                (df_t["f_ini"] <= fecha_serv) &
+                                (df_t["f_fin"] >= fecha_serv)
+                            )
+                            df_candidatas = df_t.loc[filtro_base]
+
+                            if df_candidatas.empty:
+                                return 0.0
+
+                            # Prioridad 3: Búsqueda específica por PLACA
+                             match_placa = df_candidatas[df_candidatas["placa_norm"] == placa_val]
+                             if not match_placa.empty:
+                                 return float(match_placa.iloc[0]["monto"])
+
+                            # Prioridad 4: Búsqueda general por TIPO DE UNIDAD (placa NULL o vacía)
+                             match_tipo = df_candidatas[
+                                 (df_candidatas["tipo_norm"] == tipo_val) & 
+                                 (df_candidatas["placa"].isna() | (df_candidatas["placa_norm"] == "NONE") | (df_candidatas["placa_norm"] == "NAN") | (df_candidatas["placa_norm"] == ""))
+                             ]
+                             if not match_tipo.empty:
+                                 return float(match_tipo.iloc[0]["monto"])
+
+                            return 0.0
+
+                        # Aplicar asignación de monto fila por fila
+                        df_periodo["Monto_por_Unidad"] = df_periodo.apply(determinar_monto, axis=1)
+                        df_periodo["Monto_Final_Unidad"] = df_periodo["Monto_por_Unidad"]
+                        df_periodo["Costo_IMSS"] = 0.0
+                        df_periodo["Subtotal"] = df_periodo["Monto_por_Unidad"]
+                        
+                        # Cálculos Fiscales en Python
+                        df_periodo["IVA"] = df_periodo["Subtotal"] * 0.16
+                        df_periodo["Retencion_ISR"] = df_periodo["Subtotal"] * 0.0125 if es_resico else 0.0
+                        df_periodo["Total"] = (df_periodo["Subtotal"] + df_periodo["IVA"]) - df_periodo["Retencion_ISR"]
+                        
+                        # Preparar vista de Día de la Semana
+                        df_periodo["Dia_Semana"] = pd.to_datetime(df_periodo["fecha_raw"]).dt.strftime('%A')
+                        df_periodo = df_periodo.drop(columns=["fecha_filtro", "fecha_raw", "costo_ambulancia_variable"], errors="ignore")
+
+                        # Despliegue de datos en la app
                         dia_ini = fecha_ini.strftime('%d')
                         dia_fin = fecha_fin.strftime('%d')
                         meses = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
                         mes_texto = meses[fecha_fin.month]
-                        
                         titulo_periodo = f"Corte {dia_ini} al {dia_fin} de {mes_texto} | Semana {semana_corte}"
                         
                         st.divider()
                         
-                        # --- SECCIÓN 1: AMAZON ---
-                        st.subheader(f"{titulo_periodo} | Amazon")
-                        df_amazon = df_periodo[df_periodo["Cliente"] == "Amazon"].copy()
-                        
-                        if not df_amazon.empty:
-                            st.dataframe(df_amazon, use_container_width=True)
-                            st.write("**Resumen Financiero - Amazon**")
-                            col_a1, col_a2, col_a3, col_a4 = st.columns(4)
-                            col_a1.metric("Subtotal", f"${df_amazon['Subtotal'].sum():,.2f}")
-                            col_a2.metric("IVA (16%)", f"${df_amazon['IVA'].sum():,.2f}")
-                            col_a3.metric("Retención", f"${df_amazon['Retencion_ISR'].sum():,.2f}")
-                            col_a4.metric("Total Final", f"${df_amazon['Total'].sum():,.2f}")
-                        else:
-                            st.info("No hay registros de Amazon para este periodo.")
-                            
-                        st.divider()
-                        
-                        # --- SECCIÓN 2: MERCADO LIBRE ---
-                        st.subheader(f"{titulo_periodo} | Mercado Libre")
-                        df_ml = df_periodo[df_periodo["Cliente"] == "Marketplace" if "Cliente" in df_periodo.columns and False else df_periodo["Cliente"] == "Mercado Libre"].copy()
-                        
-                        if not df_ml.empty:
-                            st.dataframe(df_ml, use_container_width=True)
-                            st.write("**Resumen Financiero - Mercado Libre**")
-                            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-                            col_m1.metric("Subtotal", f"${df_ml['Subtotal'].sum():,.2f}")
-                            col_m2.metric("IVA (16%)", f"${df_ml['IVA'].sum():,.2f}")
-                            col_m3.metric("Retención", f"${df_ml['Retencion_ISR'].sum():,.2f}")
-                            col_m4.metric("Total Final", f"${df_ml['Total'].sum():,.2f}")
-                        else:
-                            st.info("No hay registros de Mercado Libre para este periodo.")
-                            
-                        st.divider()
-                        
-                        # --- GRAN TOTAL Y RESUMEN DE SERVICIOS ---
+                        # SECCIÓN AMAZON Y MERCADO LIBRE
+                        for cli_nombre in ["Amazon", "Mercado Libre"]:
+                            st.subheader(f"{titulo_periodo} | {cli_nombre}")
+                            df_cli = df_periodo[df_periodo["Cliente"] == cli_nombre].copy()
+                            if not df_cli.empty:
+                                st.dataframe(df_cli, use_container_width=True)
+                                st.write(f"**Resumen Financiero - {cli_nombre}**")
+                                c_a1, c_a2, c_a3, c_a4 = st.columns(4)
+                                c_a1.metric("Subtotal", f"${df_cli['Subtotal'].sum():,.2f}")
+                                c_a2.metric("IVA (16%)", f"${df_cli['IVA'].sum():,.2f}")
+                                c_a3.metric("Retención", f"${df_cli['Retencion_ISR'].sum():,.2f}")
+                                c_a4.metric("Total Final", f"${df_cli['Total'].sum():,.2f}")
+                            else:
+                                st.info(f"No hay registros de {cli_nombre} para este periodo.")
+                            st.divider()
+
+                        # TOTALES GLOBALES
                         st.subheader(f"Gran Total del Periodo - {nombre_empresa_corte}")
                         t_sub = df_periodo['Subtotal'].sum()
                         t_iva = df_periodo['IVA'].sum()
                         t_ret = df_periodo['Retencion_ISR'].sum()
                         t_tot = df_periodo['Total'].sum()
                         
-                        # Métricas operativas calculadas dinámicamente
-                        total_servicios = len(df_periodo)
-                        total_small = len(df_periodo[df_periodo['Tipo'].astype(str).str.upper() == 'SMALL'])
-                        total_large = len(df_periodo[df_periodo['Tipo'].astype(str).str.upper() == 'LARGE'])
-                        total_ambulancias = len(df_periodo[df_periodo['Es_Ambulancia'] == True])
-                        total_costales = len(df_periodo[df_periodo['Es_Costal'] == True])
-                        
                         col_fin, col_ope = st.columns(2)
-                        
                         with col_fin:
-                            st.markdown("**Desglose Financiero Global:**")
                             st.markdown(f"""
+                            **Desglose Financiero Global:**
                             * **SUBTOTAL:** ${t_sub:,.2f}
                             * **IVA:** ${t_iva:,.2f}
                             * **RETENCIÓN:** ${t_ret:,.2f}
                             * **TOTAL FINAL:** **${t_tot:,.2f}**
                             """)
-                            
                         with col_ope:
-                            st.markdown("**Resumen Operativo de Servicios:**")
                             st.markdown(f"""
-                            * **Total de Servicios:** {total_servicios} viajes
-                            * **Unidades Small:** {total_small}
-                            * **Unidades Large:** {total_large}
-                            * **Servicios de Ambulancia:** {total_ambulancias}
-                            * **Servicios de Costales:** {total_costales}
+                            **Resumen Operativo de Servicios:**
+                            * **Total de Servicios:** {len(df_periodo)} viajes
+                            * **Unidades Small:** {len(df_periodo[df_periodo['Tipo'].astype(str).str.upper() == 'SMALL'])}
+                            * **Unidades Large:** {len(df_periodo[df_periodo['Tipo'].astype(str).str.upper() == 'LARGE'])}
+                            * **Servicios de Ambulancia:** {len(df_periodo[df_periodo['Es_Ambulancia'] == True])}
+                            * **Servicios de Costales:** {len(df_periodo[df_periodo['Es_Costal'] == True])}
                             """)
 
-                        # --- MATRIZ DE SERVICIOS POR DÍA DE LA SEMANA ---
+                        # MATRIZ POR DÍA DE LA SEMANA
                         st.write("---")
                         st.subheader("📅 Distribución Estructurada de Servicios por Día")
-                        
                         def clasificar_servicio(row):
-                            if row.get("Es_Ambulancia") == True:
-                                return "Ambulancia"
-                            elif row.get("Es_Costal") == True:
-                                return "Costal"
-                            else:
-                                tipo = str(row.get("Tipo", "")).upper()
-                                if "SMALL" in tipo:
-                                    return "Small"
-                                elif "LARGE" in tipo:
-                                    return "Large"
+                            if row.get("Es_Ambulancia") == True: return "Ambulancia"
+                            if row.get("Es_Costal") == True: return "Costal"
+                            tipo = str(row.get("Tipo", "")).upper()
+                            if "SMALL" in tipo: return "Small"
+                            if "LARGE" in tipo: return "Large"
                             return "Otros"
 
                         df_periodo["Categoria_Servicio"] = df_periodo.apply(clasificar_servicio, axis=1)
-
                         dias_ordenados = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-                        dias_espanol = {
-                            "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles", 
-                            "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"
-                        }
+                        dias_espanol = {"Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles", "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"}
                         
-                        categorias_filas = ["Small", "Large", "Ambulancia", "Costal", "Otros"]
+                        matriz_pivot = pd.crosstab(index=df_periodo["Categoria_Servicio"], columns=df_periodo["Dia_Semana"])
+                        matriz_pivot = matriz_pivot.reindex(index=["Small", "Large", "Ambulancia", "Costal", "Otros"], columns=dias_ordenados, fill_value=0).rename(columns=dias_espanol)
+                        if "Otros" in matriz_pivot.index and matriz_pivot.loc["Otros"].sum() == 0:
+                            matriz_pivot = matriz_pivot.drop(index="Otros")
+                        matriz_pivot["Total General"] = matriz_pivot.sum(axis=1)
+                        matriz_pivot.loc["TOTAL SERVICIOS"] = matriz_pivot.sum(axis=0)
+                        st.dataframe(matriz_pivot, use_container_width=True)
 
-                        if not df_periodo.empty:
-                            matriz_pivot = pd.crosstab(
-                                index=df_periodo["Categoria_Servicio"],
-                                columns=df_periodo["Dia_Semana"]
-                            )
-                            
-                            matriz_pivot = matriz_pivot.reindex(index=categorias_filas, columns=dias_ordenados, fill_value=0)
-                            matriz_pivot = matriz_pivot.rename(columns=dias_espanol)
-                            
-                            if matriz_pivot.loc["Otros"].sum() == 0:
-                                matriz_pivot = matriz_pivot.drop(index="Otros")
-
-                            matriz_pivot["Total General"] = matriz_pivot.sum(axis=1)
-                            matriz_pivot.loc["TOTAL SERVICIOS"] = matriz_pivot.sum(axis=0)
-                            
-                            st.dataframe(matriz_pivot, use_container_width=True)
-                        
-                        # ==========================================
-                        # MÓDULO DE EXPORTACIÓN (EXCEL Y PDF)
-                        # ==========================================
-                        st.write("---")
-                        st.subheader("📥 Exportar Reportes")
-                        col_btn1, col_btn2 = st.columns(2)
-                        
-                        def generar_excel():
-                            output = io.BytesIO()
-                            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                                if not df_amazon.empty:
-                                    df_amazon.to_excel(writer, sheet_name='Amazon', index=False)
-                                if not df_ml.empty:
-                                    df_ml.to_excel(writer, sheet_name='Mercado Libre', index=False)
-                                
-                                df_resumen = pd.DataFrame([{
-                                    "Empresa": nombre_empresa_corte,
-                                    "Periodo": titulo_periodo,
-                                    "Subtotal Total": t_sub,
-                                    "IVA Total": t_iva,
-                                    "Retencion Total": t_ret,
-                                    "Total Final": t_tot,
-                                    "Total Servicios": total_servicios,
-                                    "Total Small": total_small,
-                                    "Total Large": total_large,
-                                    "Total Ambulancias": total_ambulancias,
-                                    "Total Costales": total_costales
-                                }])
-                                df_resumen.to_excel(writer, sheet_name='Resumen Financiero', index=False)
-                            return output.getvalue()
-                            
-                        def generar_pdf():
-                            pdf = FPDF(orientation='L', unit='mm', format='A4')
-                            pdf.set_auto_page_break(auto=True, margin=15)
-                            ANCHO_UTIL = 277
-
-                            pdf.add_page()
-                            pdf.set_font("Arial", 'B', 16)
-                            pdf.cell(ANCHO_UTIL, 10, txt=f"Reporte de Conciliacion - {nombre_empresa_corte}", ln=True, align='C')
-                            pdf.set_font("Arial", size=12)
-                            pdf.cell(ANCHO_UTIL, 10, txt=f"Periodo: {titulo_periodo}", ln=True, align='C')
-                            pdf.ln(10)
-
-                            pdf.set_font("Arial", 'B', 12)
-                            pdf.cell(ANCHO_UTIL, 10, txt="RESUMEN FINANCIERO GLOBAL", ln=True, align='L')
-                            pdf.set_font("Arial", size=12)
-                            datos_resumen = [("Subtotal", t_sub), ("IVA (16%)", t_iva), ("Retencion", t_ret), ("TOTAL FINAL", t_tot)]
-                            for label, val in datos_resumen:
-                                pdf.cell(100, 10, label, border=1)
-                                pdf.cell(50, 10, f"${val:,.2f}", border=1, ln=True, align='R')
-
-                            pdf.add_page()
-
-                            columnas_tabla = [
-                                ("Hora_Arribo",         "Hora Arribo",   16, 'C'),
-                                ("Ambulancia",          "Ambul.",        10, 'C'),
-                                ("Costal",              "Costal",        10, 'C'),
-                                ("Paquetes",            "Paq.",          9,  'C'),
-                                ("Paradas",             "Paradas",       11, 'C'),
-                                ("Condicion",           "Condicion",     16, 'C'),
-                                ("Placas",              "Placas",        14, 'C'),
-                                ("Tipo",                "Tipo",          12, 'C'),
-                                ("Marca_del_Vehiculo",  "Marca",         14, 'L'),
-                                ("Conductor",           "Conductor",     28, 'L'),
-                                ("Cliente",             "Cliente",       14, 'C'),
-                                ("Monto_por_Unidad",    "Monto Unid.",   15, 'R'),
-                                ("Monto_Final_Unidad",  "Monto Final",   15, 'R'),
-                                ("Costo_IMSS",          "Costo IMSS",    14, 'R'),
-                                ("Subtotal",            "Subtotal",      14, 'R'),
-                                ("IVA",                 "IVA",           12, 'R'),
-                                ("Retencion_ISR",       "Retencion",     13, 'R'),
-                                ("Total",               "Total",         14, 'R'),
-                                ("__SEMANA__",          "Sem.",          8,  'C'),
-                            ]
-
-                            FS_HEADER = 6.5
-                            FS_DATA = 6
-                            ALTO_FILA = 5
-
-                            def fmt_valor(clave, valor):
-                                if clave == "__SEMANA__":
-                                    return str(semana_corte)
-                                if clave in ("Ambulancia", "Costal", "Es_Ambulancia", "Es_Costal"):
-                                    return "SI" if valor else "NO"
-                                if clave in ("Monto_por_Unidad", "Monto_Final_Unidad", "Costo_IMSS", "Subtotal", "IVA", "Retencion_ISR", "Total"):
-                                    try:
-                                        return f"${float(valor or 0):,.2f}"
-                                    except (ValueError, TypeError):
-                                        return "$0.00"
-                                if clave == "Hora_Arribo":
-                                    return str(valor)[:16]
-                                
-                                texto = str(valor) if valor is not None else ""
-                                return texto.encode('latin-1', 'replace').decode('latin-1')
-
-                            def pintar_encabezado_tabla():
-                                pdf.set_font("Arial", 'B', FS_HEADER)
-                                pdf.set_fill_color(220, 220, 220)
-                                for clave, header, ancho, alineacion in columnas_tabla:
-                                    pdf.cell(ancho, 7, header, 1, 0, 'C', fill=True)
-                                pdf.ln()
-
-                            def pintar_tabla_detalle(df, titulo_tabla):
-                                pdf.set_font("Arial", 'B', 12)
-                                pdf.cell(ANCHO_UTIL, 8, titulo_tabla, ln=True, align='L')
-                                pdf.ln(1)
-
-                                if df.empty:
-                                    pdf.set_font("Arial", '', 10)
-                                    pdf.cell(ANCHO_UTIL, 8, "No hay registros en este periodo.", ln=True, align='L')
-                                    pdf.ln(5)
-                                    return
-
-                                pintar_encabezado_tabla()
-                                pdf.set_font("Arial", '', FS_DATA)
-
-                                for _, row in df.iterrows():
-                                    es_amb = row.get("Ambulancia") or row.get("Es_Ambulancia")
-                                    es_cos = row.get("Costal") or row.get("Es_Costal")
-                                    
-                                    if es_amb:
-                                        pdf.set_fill_color(173, 216, 230)
-                                    elif es_cos:
-                                        pdf.set_fill_color(255, 200, 200)
-                                    else:
-                                        pdf.set_fill_color(255, 255, 255)
-
-                                    for clave, header, ancho, alineacion in columnas_tabla:
-                                        valor_crudo = row.get(clave, "")
-                                        texto = fmt_valor(clave, valor_crudo)
-                                        pdf.cell(ancho, ALTO_FILA, texto, 1, 0, alineacion, fill=True)
-                                    pdf.ln()
-
-                                pdf.set_font("Arial", 'B', FS_DATA)
-                                columnas_suma = ["Monto_por_Unidad", "Monto_Final_Unidad", "Costo_IMSS", "Subtotal", "IVA", "Retencion_ISR", "Total"]
-                                ancho_label = sum(a for c, h, a, al in columnas_tabla if c not in columnas_suma and c != "__SEMANA__")
-                                pdf.cell(ancho_label, 6, "TOTALES", 1, 0, 'R', fill=True)
-                                pdf.set_fill_color(230, 230, 230)
-                                
-                                for clave, header, ancho, alineacion in columnas_tabla:
-                                    if clave in columnas_suma:
-                                        total_col = pd.to_numeric(df[clave], errors='coerce').sum() if clave in df.columns else 0
-                                        pdf.cell(ancho, 6, f"${total_col:,.2f}", 1, 0, 'R', fill=True)
-                                    elif clave == "__SEMANA__":
-                                        pdf.cell(ancho, 6, "", 1, 0, 'C', fill=True) 
-                                pdf.ln(8)
-
-                            def pintar_tabla_salarios(df, titulo_tabla):
-                                pdf.set_font("Arial", 'B', 11)
-                                pdf.cell(ANCHO_UTIL, 7, titulo_tabla, ln=True, align='L')
-                                pdf.ln(1)
-
-                                if df.empty or "Conductor" not in df.columns:
-                                    pdf.set_font("Arial", '', 9)
-                                    pdf.cell(ANCHO_UTIL, 6, "Sin datos de conductores.", ln=True, align='L')
-                                    pdf.ln(5)
-                                    return
-
-                                agg_dict = {"Costo_IMSS": "sum"}
-                                if "Banco" in df.columns: agg_dict["Banco"] = "first"
-                                if "Cuenta_clabe" in df.columns: agg_dict["Cuenta_clabe"] = "first"
-                                elif "cuenta_clabe" in df.columns: agg_dict["cuenta_clabe"] = "first"
-
-                                df_sal = df.groupby("Conductor").agg(agg_dict).reset_index()
-                                df_sal = df_sal.sort_values(by="Conductor")
-
-                                w_cond, w_banco, w_clabe, w_sal = 70, 50, 45, 40
-
-                                pdf.set_font("Arial", 'B', 9)
-                                pdf.set_fill_color(220, 220, 220)
-                                pdf.cell(w_cond, 7, "Conductor", 1, 0, 'C', fill=True)
-                                pdf.cell(w_banco, 7, "Banco", 1, 0, 'C', fill=True)
-                                pdf.cell(w_clabe, 7, "Cuenta Clabe", 1, 0, 'C', fill=True)
-                                pdf.cell(w_sal, 7, "Salario Base", 1, 1, 'C', fill=True)
-
-                                pdf.set_font("Arial", '', 8)
-                                total_salario = 0
-                                for _, row in df_sal.iterrows():
-                                    val_c = str(row["Conductor"]).encode('latin-1', 'replace').decode('latin-1')
-                                    val_b = str(row.get("Banco", "") or "").encode('latin-1', 'replace').decode('latin-1')
-                                    val_cl = str(row.get("Cuenta_clabe", row.get("cuenta_clabe", "")))
-                                    val_s = float(row.get("Costo_IMSS", 0) or 0)
-                                    total_salario += val_s
-
-                                    pdf.cell(w_cond, 6, val_c, 1, 0, 'L')
-                                    pdf.cell(w_banco, 6, val_b, 1, 0, 'L')
-                                    pdf.cell(w_clabe, 6, val_cl, 1, 0, 'C')
-                                    pdf.cell(w_sal, 6, f"${val_s:,.2f}", 1, 1, 'R')
-
-                                pdf.set_font("Arial", 'B', 8)
-                                pdf.cell(w_cond + w_banco + w_clabe, 6, "TOTAL A DEPOSITAR", 1, 0, 'R')
-                                pdf.cell(w_sal, 6, f"${total_salario:,.2f}", 1, 1, 'R')
-                                pdf.ln(8)
-
-                            def pintar_resumen_unidades(df, titulo_tabla):
-                                pdf.set_font("Arial", 'B', 11)
-                                pdf.cell(ANCHO_UTIL, 7, titulo_tabla, ln=True, align='L')
-                                pdf.ln(1)
-
-                                if df.empty or "Condicion" not in df.columns:
-                                    en_ruta, canceladas = 0, 0
-                                else:
-                                    en_ruta = len(df[df['Condicion'] == 'En ruta'])
-                                    canceladas = len(df[df['Condicion'] == 'Cancelacion'])
-
-                                w_label, w_val = 60, 30
-
-                                pdf.set_font("Arial", '', 9)
-                                pdf.set_fill_color(173, 216, 230)
-                                pdf.cell(w_label, 6, "Unidades en Ruta", 1, 0, 'L', fill=True)
-                                pdf.cell(w_val, 6, str(en_ruta), 1, 1, 'C', fill=True)
-
-                                pdf.set_fill_color(255, 200, 200)
-                                pdf.cell(w_label, 6, "Unidades Canceladas", 1, 0, 'L', fill=True)
-                                pdf.cell(w_val, 6, str(canceladas), 1, 1, 'C', fill=True)
-                                pdf.ln(15)
-
-                            titulo_amazon = f"{titulo_periodo} | Amazon"
-                            pintar_tabla_detalle(df_amazon, titulo_amazon)
-                            pintar_tabla_salarios(df_amazon, f"Salario minimo choferes Amazon | Semana {semana_corte}")
-                            pintar_resumen_unidades(df_amazon, f"Resumen de Unidades | Amazon | Semana {semana_corte}")
-
-                            titulo_ml = f"{titulo_periodo} | Mercado Libre"
-                            pintar_tabla_detalle(df_ml, titulo_ml)
-                            pintar_tabla_salarios(df_ml, f"Salario minimo choferes Mercado Libre | Semana {semana_corte}")
-                            pintar_resumen_unidades(df_ml, f"Resumen de Unidades | Mercado Libre | Semana {semana_corte}")
-
-                            return pdf.output(dest='S').encode('latin1')
-
-                        with col_btn1:
-                            st.download_button(
-                                label="📊 Descargar Sábana en Excel",
-                                data=generar_excel(),
-                                file_name=f"Conciliacion_{nombre_empresa_corte}_Semana{semana_corte}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
-                        with col_btn2:
-                            st.download_button(
-                                label="📄 Descargar Resumen Detallado PDF",
-                                data=generar_pdf(),
-                                file_name=f"Reporte_Detallado_{nombre_empresa_corte}_Semana{semana_corte}.pdf",
-                                mime="application/pdf"
-                            )
-                            
                     else:
                         st.warning("No se encontraron viajes capturados en las fechas seleccionadas.")
             except Exception as e:
