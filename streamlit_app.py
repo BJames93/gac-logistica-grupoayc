@@ -839,8 +839,8 @@ if es_admin:
             
         if st.button("Generar Conciliación"):
             try:
-                # 1. CONSULTA DIRECTA A TABLAS BASE (SIN DEPENDER DE VISTAS SQL)
-                res_reporte = supabase.table("operaciones").select("*").execute()
+                # 1. CONSULTA DIRECTA A LA TABLA BASE CORRECTA ('registro_operacion')
+                res_reporte = supabase.table("registro_operacion").select("*").execute()
                 res_tarifas = supabase.table("tarifas").select("*").execute()
                 
                 df_rep = pd.DataFrame(res_reporte.data)
@@ -849,23 +849,32 @@ if es_admin:
                 if not df_rep.empty:
                     # Mapeo de columnas con nombres en minúscula/mayúscula
                     column_map = {
+                        "hora_llegada_hub": "Hora_Arribo",
                         "hora_arribo": "Hora_Arribo",
+                        "ambulancia": "Es_Ambulancia",
+                        "costal": "Es_Costal",
                         "es_ambulancia": "Es_Ambulancia",
                         "es_costal": "Es_Costal",
+                        "paquetes_cargados": "Paquetes",
                         "paquetes": "Paquetes",
                         "paradas": "Paradas",
+                        "status_operacion": "Condicion",
                         "condicion": "Condicion",
                         "placas": "Placas",
                         "placa": "Placas",
+                        "tipo_unidad": "Tipo",
                         "tipo": "Tipo",
+                        "marca": "Marca_del_Vehiculo",
                         "marca_del_vehiculo": "Marca_del_Vehiculo",
                         "conductor": "Conductor",
+                        "nombre_driver": "Conductor",
+                        "tipo_cliente": "Cliente",
                         "cliente": "Cliente"
                     }
                     df_rep = df_rep.rename(columns=column_map)
 
                     # DETECCIÓN AUTOMÁTICA Y ROBUSTA DE LA COLUMNA DE FECHA
-                    posibles_fechas = [c for c in df_rep.columns if any(k in c.lower() for k in ["hora", "fecha", "arribo", "created"])]
+                    posibles_fechas = [c for c in df_rep.columns if any(k in c.lower() for k in ["hora", "fecha", "arribo", "created", "captura"])]
                     
                     if posibles_fechas:
                         col_fecha_usar = posibles_fechas[0]
