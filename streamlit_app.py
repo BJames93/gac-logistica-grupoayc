@@ -842,7 +842,7 @@ if es_admin:
                 # El sistema decide qué vista consultar según el radio button
                 tabla_consultar = "vista_reporte_ayc" if es_resico else "vista_reporte_bb"
                 
-                # Consultamos la vista directa y la tabla de tarifas para cálculo financiero
+                # Consultamos la vista directa y la tabla de tarifas
                 res_reporte = supabase.table(tabla_consultar).select("*").execute()
                 res_tarifas = supabase.table("tarifas").select("*").execute()
                 
@@ -850,17 +850,28 @@ if es_admin:
                 df_tarifas = pd.DataFrame(res_tarifas.data)
                 
                 if not df_rep.empty:
+                    # Mapeo universal de columnas (evita fallos por minúsculas/mayúsculas)
+                    col_map = {c: c for c in df_rep.columns}
+                    for c in df_rep.columns:
+                        clow = c.lower()
+                        if clow in ["cliente", "tipo_cliente"]: col_map[c] = "Cliente"
+                        elif clow in ["tipo", "tipo_unidad", "tipo_vehiculo"]: col_map[c] = "Tipo"
+                        elif clow in ["placas", "placa"]: col_map[c] = "Placas"
+                        elif clow in ["es_ambulancia", "ambulancia"]: col_map[c] = "Es_Ambulancia"
+                        elif clow in ["es_costal", "costal"]: col_map[c] = "Es_Costal"
+                        elif clow in ["hora_arribo", "hora_llegada_hub", "fecha_filtro"]: col_map[c] = "fecha_filtro"
+                    df_rep = df_rep.rename(columns=col_map)
+
                     # Filtramos por las fechas seleccionadas en la interfaz
-                    col_fecha = "fecha_filtro" if "fecha_filtro" in df_rep.columns else "Hora_Arribo"
-                    df_rep["fecha_raw"] = pd.to_datetime(df_rep[col_fecha], errors='coerce').dt.tz_localize(None).dt.date
+                    df_rep["fecha_raw"] = pd.to_datetime(df_rep["fecha_filtro"], errors='coerce').dt.tz_localize(None).dt.date
                     mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
                     df_periodo = df_rep.loc[mascara_fechas].copy()
                     
                     if not df_periodo.empty:
-                        # Guardamos la fecha con formato de día para la matriz antes de eliminar la columna técnica
+                        # Guardamos el día de la semana
                         df_periodo["Dia_Semana"] = pd.to_datetime(df_periodo["fecha_raw"]).dt.strftime('%A')
                         
-                        # --- CÁLCULO FINANCIERO DINÁMICO (Genera Subtotal, IVA, Retención y Total) ---
+                        # --- PRE-PROCESAMIENTO DE TARIFAS ---
                         if not df_tarifas.empty:
                             df_t = df_tarifas.copy()
                             df_t["empresa_norm"] = df_t["nombre_empresa"].astype(str).str.replace(" ", "").str.upper()
@@ -884,6 +895,7 @@ if es_admin:
                         else:
                             df_t = pd.DataFrame()
 
+                        # --- LÓGICA DE ASIGNACIÓN DE TARIFAS ---
                         def determinar_monto(row):
                             es_costal = str(row.get("Es_Costal")).strip().lower() in ["true", "1", "t"]
                             es_ambulancia = str(row.get("Es_Ambulancia")).strip().lower() in ["true", "1", "t"]
@@ -909,6 +921,7 @@ if es_admin:
                             if df_t.empty or cliente_val in ["", "NONE", "NAN"]:
                                 return 0.0
 
+                            # Filtrar por empresa, cliente y vigencia
                             filtro_base = (
                                 (df_t["empresa_norm"].str.contains(kw_empresa, na=False)) &
                                 (df_t["cliente_norm"] == cliente_val) &
@@ -920,11 +933,13 @@ if es_admin:
                             if df_candidatas.empty:
                                 return 0.0
 
+                            # 1. Coincidencia por Placa Específica
                             if placa_val not in ["", "NONE", "NAN"]:
                                 match_placa = df_candidatas[df_candidatas["placa_norm"] == placa_val]
                                 if not match_placa.empty:
                                     return float(match_placa.iloc[0]["monto"])
 
+                            # 2. Coincidencia por Tipo de Unidad General
                             match_tipo = df_candidatas[
                                 (df_candidatas["tipo_norm"] == tipo_val) & 
                                 (df_candidatas["placa_norm"].isin(["", "NONE", "NAN"]) | df_candidatas["placa"].isna())
@@ -934,15 +949,16 @@ if es_admin:
 
                             return 0.0
 
+                        # Aplicación de montos e impuestos
                         df_periodo["Monto_por_Unidad"] = df_periodo.apply(determinar_monto, axis=1)
                         df_periodo["Monto_Final_Unidad"] = df_periodo["Monto_por_Unidad"]
-                        df_periodo["Costo_IMSS"] = 0.0
+                        df_periodo["Costo_IMSS"] = df_periodo.get("Costo_IMSS", 0.0)
                         df_periodo["Subtotal"] = df_periodo["Monto_por_Unidad"]
                         df_periodo["IVA"] = df_periodo["Subtotal"] * 0.16
                         df_periodo["Retencion_ISR"] = df_periodo["Subtotal"] * 0.0125 if es_resico else 0.0
                         df_periodo["Total"] = (df_periodo["Subtotal"] + df_periodo["IVA"]) - df_periodo["Retencion_ISR"]
 
-                        # Eliminamos columnas técnicas (errors="ignore" evita fallos si no existen)
+                        # Eliminamos columnas técnicas
                         df_periodo = df_periodo.drop(columns=["fecha_filtro", "fecha_raw"], errors="ignore")
                         
                         dia_ini = fecha_ini.strftime('%d')
@@ -956,7 +972,7 @@ if es_admin:
                         
                         # --- SECCIÓN 1: AMAZON ---
                         st.subheader(f"{titulo_periodo} | Amazon")
-                        df_amazon = df_periodo[df_periodo["Cliente"] == "Amazon"].copy()
+                        df_amazon = df_periodo[df_periodo["Cliente"].astype(str).str.strip().str.upper() == "AMAZON"].copy()
                         
                         if not df_amazon.empty:
                             st.dataframe(df_amazon, use_container_width=True)
@@ -973,7 +989,7 @@ if es_admin:
                         
                         # --- SECCIÓN 2: MERCADO LIBRE ---
                         st.subheader(f"{titulo_periodo} | Mercado Libre")
-                        df_ml = df_periodo[df_periodo["Cliente"] == "Marketplace" if "Cliente" in df_periodo.columns and False else df_periodo["Cliente"] == "Mercado Libre"].copy()
+                        df_ml = df_periodo[df_periodo["Cliente"].astype(str).str.strip().str.upper() == "MERCADO LIBRE"].copy()
                         
                         if not df_ml.empty:
                             st.dataframe(df_ml, use_container_width=True)
@@ -995,12 +1011,12 @@ if es_admin:
                         t_ret = df_periodo['Retencion_ISR'].sum()
                         t_tot = df_periodo['Total'].sum()
                         
-                        # Métricas operativas calculadas dinámicamente
+                        # Métricas operativas
                         total_servicios = len(df_periodo)
                         total_small = len(df_periodo[df_periodo['Tipo'].astype(str).str.upper() == 'SMALL'])
                         total_large = len(df_periodo[df_periodo['Tipo'].astype(str).str.upper() == 'LARGE'])
-                        total_ambulancias = len(df_periodo[df_periodo['Es_Ambulancia'] == True])
-                        total_costales = len(df_periodo[df_periodo['Es_Costal'] == True])
+                        total_ambulancias = len(df_periodo[df_periodo['Es_Ambulancia'].astype(str).str.lower().isin(["true", "1", "t"])])
+                        total_costales = len(df_periodo[df_periodo['Es_Costal'].astype(str).str.lower().isin(["true", "1", "t"])])
                         
                         col_fin, col_ope = st.columns(2)
                         
@@ -1028,9 +1044,9 @@ if es_admin:
                         st.subheader("📅 Distribución Estructurada de Servicios por Día")
                         
                         def clasificar_servicio(row):
-                            if row.get("Es_Ambulancia") == True:
+                            if str(row.get("Es_Ambulancia")).strip().lower() in ["true", "1", "t"]:
                                 return "Ambulancia"
-                            elif row.get("Es_Costal") == True:
+                            elif str(row.get("Es_Costal")).strip().lower() in ["true", "1", "t"]:
                                 return "Costal"
                             else:
                                 tipo = str(row.get("Tipo", "")).upper()
@@ -1150,13 +1166,13 @@ if es_admin:
                                 if clave == "__SEMANA__":
                                     return str(semana_corte)
                                 if clave in ("Ambulancia", "Costal", "Es_Ambulancia", "Es_Costal"):
-                                    return "SI" if valor else "NO"
+                                    return "SI" if str(valor).lower() in ["true", "1", "t"] else "NO"
                                 if clave in ("Monto_por_Unidad", "Monto_Final_Unidad", "Costo_IMSS", "Subtotal", "IVA", "Retencion_ISR", "Total"):
                                     try:
                                         return f"${float(valor or 0):,.2f}"
                                     except (ValueError, TypeError):
                                         return "$0.00"
-                                if clave == "Hora_Arribo":
+                                if clave == "Hora_Arribo" or clave == "fecha_filtro":
                                     return str(valor)[:16]
                                 
                                 texto = str(valor) if valor is not None else ""
@@ -1184,8 +1200,8 @@ if es_admin:
                                 pdf.set_font("Arial", '', FS_DATA)
 
                                 for _, row in df.iterrows():
-                                    es_amb = row.get("Ambulancia") or row.get("Es_Ambulancia")
-                                    es_cos = row.get("Costal") or row.get("Es_Costal")
+                                    es_amb = str(row.get("Es_Ambulancia")).lower() in ["true", "1", "t"]
+                                    es_cos = str(row.get("Es_Costal")).lower() in ["true", "1", "t"]
                                     
                                     if es_amb:
                                         pdf.set_fill_color(173, 216, 230)
@@ -1219,7 +1235,8 @@ if es_admin:
                                 pdf.cell(ANCHO_UTIL, 7, titulo_tabla, ln=True, align='L')
                                 pdf.ln(1)
 
-                                if df.empty or "Conductor" not in df.columns:
+                                col_cond = "Conductor" if "Conductor" in df.columns else ("nombre_driver" if "nombre_driver" in df.columns else None)
+                                if df.empty or not col_cond:
                                     pdf.set_font("Arial", '', 9)
                                     pdf.cell(ANCHO_UTIL, 6, "Sin datos de conductores.", ln=True, align='L')
                                     pdf.ln(5)
@@ -1230,8 +1247,8 @@ if es_admin:
                                 if "Cuenta_clabe" in df.columns: agg_dict["Cuenta_clabe"] = "first"
                                 elif "cuenta_clabe" in df.columns: agg_dict["cuenta_clabe"] = "first"
 
-                                df_sal = df.groupby("Conductor").agg(agg_dict).reset_index()
-                                df_sal = df_sal.sort_values(by="Conductor")
+                                df_sal = df.groupby(col_cond).agg(agg_dict).reset_index()
+                                df_sal = df_sal.sort_values(by=col_cond)
 
                                 w_cond, w_banco, w_clabe, w_sal = 70, 50, 45, 40
 
@@ -1245,7 +1262,7 @@ if es_admin:
                                 pdf.set_font("Arial", '', 8)
                                 total_salario = 0
                                 for _, row in df_sal.iterrows():
-                                    val_c = str(row["Conductor"]).encode('latin-1', 'replace').decode('latin-1')
+                                    val_c = str(row[col_cond]).encode('latin-1', 'replace').decode('latin-1')
                                     val_b = str(row.get("Banco", "") or "").encode('latin-1', 'replace').decode('latin-1')
                                     val_cl = str(row.get("Cuenta_clabe", row.get("cuenta_clabe", "")))
                                     val_s = float(row.get("Costo_IMSS", 0) or 0)
@@ -1266,11 +1283,12 @@ if es_admin:
                                 pdf.cell(ANCHO_UTIL, 7, titulo_tabla, ln=True, align='L')
                                 pdf.ln(1)
 
-                                if df.empty or "Condicion" not in df.columns:
+                                col_condic = "Condicion" if "Condicion" in df.columns else ("status_operacion" if "status_operacion" in df.columns else None)
+                                if df.empty or not col_condic:
                                     en_ruta, canceladas = 0, 0
                                 else:
-                                    en_ruta = len(df[df['Condicion'] == 'En ruta'])
-                                    canceladas = len(df[df['Condicion'] == 'Cancelacion'])
+                                    en_ruta = len(df[df[col_condic] == 'En ruta'])
+                                    canceladas = len(df[df[col_condic] == 'Cancelacion'])
 
                                 w_label, w_val = 60, 30
 
