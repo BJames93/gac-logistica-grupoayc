@@ -843,7 +843,7 @@ if es_admin:
                 # El sistema decide qué vista consultar según el radio button
                 tabla_consultar = "vista_reporte_ayc" if es_resico else "vista_reporte_bb"
                 
-                # Consultamos la vista directa (Supabase ya hizo los cálculos)
+                # Consultamos la vista directa (Supabase resuelve asignación por Placa > Tipo de Unidad)
                 res_reporte = supabase.table(tabla_consultar).select("*").execute()
                 df_rep = pd.DataFrame(res_reporte.data)
                 
@@ -938,11 +938,10 @@ if es_admin:
                             * **Servicios de Costales:** {total_costales}
                             """)
 
-                        # --- NUEVO CÓDIGO: MATRIZ DE SERVICIOS POR DÍA DE LA SEMANA ---
+                        # --- MATRIZ DE SERVICIOS POR DÍA DE LA SEMANA ---
                         st.write("---")
                         st.subheader("📅 Distribución Estructurada de Servicios por Día")
                         
-                        # Clasificamos cada registro en su categoría exclusiva
                         def clasificar_servicio(row):
                             if row.get("Es_Ambulancia") == True:
                                 return "Ambulancia"
@@ -958,37 +957,29 @@ if es_admin:
 
                         df_periodo["Categoria_Servicio"] = df_periodo.apply(clasificar_servicio, axis=1)
 
-                        # Mapeo de días en inglés a español para el ordenamiento correcto de las columnas
                         dias_ordenados = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
                         dias_espanol = {
                             "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles", 
                             "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"
                         }
                         
-                        # Categorías fijas de filas
                         categorias_filas = ["Small", "Large", "Ambulancia", "Costal", "Otros"]
 
-                        # Creamos tabla pivote cruzada
                         if not df_periodo.empty:
                             matriz_pivot = pd.crosstab(
                                 index=df_periodo["Categoria_Servicio"],
                                 columns=df_periodo["Dia_Semana"]
                             )
                             
-                            # Reindexamos columnas y filas para garantizar consistencia y orden cronológico
                             matriz_pivot = matriz_pivot.reindex(index=categorias_filas, columns=dias_ordenados, fill_value=0)
-                            # Renombramos las columnas a español
                             matriz_pivot = matriz_pivot.rename(columns=dias_espanol)
                             
-                            # Removemos la fila 'Otros' si quedó completamente en ceros para limpiar el diseño
                             if matriz_pivot.loc["Otros"].sum() == 0:
                                 matriz_pivot = matriz_pivot.drop(index="Otros")
 
-                            # Agregamos totales de filas y columnas
                             matriz_pivot["Total General"] = matriz_pivot.sum(axis=1)
                             matriz_pivot.loc["TOTAL SERVICIOS"] = matriz_pivot.sum(axis=0)
                             
-                            # Desplegar la tabla estructurada en la app
                             st.dataframe(matriz_pivot, use_container_width=True)
                         
                         # ==========================================
@@ -998,7 +989,6 @@ if es_admin:
                         st.subheader("📥 Exportar Reportes")
                         col_btn1, col_btn2 = st.columns(2)
                         
-                        # 1. FUNCIÓN PARA EXCEL
                         def generar_excel():
                             output = io.BytesIO()
                             with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -1007,7 +997,6 @@ if es_admin:
                                 if not df_ml.empty:
                                     df_ml.to_excel(writer, sheet_name='Mercado Libre', index=False)
                                 
-                                # Pestaña de resumen
                                 df_resumen = pd.DataFrame([{
                                     "Empresa": nombre_empresa_corte,
                                     "Periodo": titulo_periodo,
@@ -1024,15 +1013,11 @@ if es_admin:
                                 df_resumen.to_excel(writer, sheet_name='Resumen Financiero', index=False)
                             return output.getvalue()
                             
-                        # 2. FUNCIÓN PARA PDF (Hoja 1: Resumen Global | Hoja 2+: Detalle completo continuo)
                         def generar_pdf():
-                            pdf = FPDF(orientation='L', unit='mm', format='A4')  # Orientación horizontal
+                            pdf = FPDF(orientation='L', unit='mm', format='A4')
                             pdf.set_auto_page_break(auto=True, margin=15)
-                            ANCHO_UTIL = 277  # ancho útil aproximado en A4 horizontal
+                            ANCHO_UTIL = 277
 
-                            # =========================================================
-                            # HOJA 1: RESUMEN GLOBAL
-                            # =========================================================
                             pdf.add_page()
                             pdf.set_font("Arial", 'B', 16)
                             pdf.cell(ANCHO_UTIL, 10, txt=f"Reporte de Conciliacion - {nombre_empresa_corte}", ln=True, align='C')
@@ -1048,12 +1033,8 @@ if es_admin:
                                 pdf.cell(100, 10, label, border=1)
                                 pdf.cell(50, 10, f"${val:,.2f}", border=1, ln=True, align='R')
 
-                            # =========================================================
-                            # HOJA 2: INICIO DE DATOS DETALLADOS (Flujo continuo)
-                            # =========================================================
                             pdf.add_page()
 
-                            # Definición de columnas para la tabla grande (19 columnas solicitadas)
                             columnas_tabla = [
                                 ("Hora_Arribo",         "Hora Arribo",   16, 'C'),
                                 ("Ambulancia",          "Ambul.",        10, 'C'),
@@ -1081,7 +1062,6 @@ if es_admin:
                             ALTO_FILA = 5
 
                             def fmt_valor(clave, valor):
-                                """Formatea el valor según el tipo de columna."""
                                 if clave == "__SEMANA__":
                                     return str(semana_corte)
                                 if clave in ("Ambulancia", "Costal", "Es_Ambulancia", "Es_Costal"):
@@ -1123,9 +1103,9 @@ if es_admin:
                                     es_cos = row.get("Costal") or row.get("Es_Costal")
                                     
                                     if es_amb:
-                                        pdf.set_fill_color(173, 216, 230)  # Azul claro
+                                        pdf.set_fill_color(173, 216, 230)
                                     elif es_cos:
-                                        pdf.set_fill_color(255, 200, 200)  # Rojo claro
+                                        pdf.set_fill_color(255, 200, 200)
                                     else:
                                         pdf.set_fill_color(255, 255, 255)
 
@@ -1135,7 +1115,6 @@ if es_admin:
                                         pdf.cell(ancho, ALTO_FILA, texto, 1, 0, alineacion, fill=True)
                                     pdf.ln()
 
-                                # --- Totales por columna ---
                                 pdf.set_font("Arial", 'B', FS_DATA)
                                 columnas_suma = ["Monto_por_Unidad", "Monto_Final_Unidad", "Costo_IMSS", "Subtotal", "IVA", "Retencion_ISR", "Total"]
                                 ancho_label = sum(a for c, h, a, al in columnas_tabla if c not in columnas_suma and c != "__SEMANA__")
@@ -1220,13 +1199,11 @@ if es_admin:
                                 pdf.cell(w_val, 6, str(canceladas), 1, 1, 'C', fill=True)
                                 pdf.ln(15)
 
-                            # --- BLOQUE AMAZON ---
                             titulo_amazon = f"{titulo_periodo} | Amazon"
                             pintar_tabla_detalle(df_amazon, titulo_amazon)
                             pintar_tabla_salarios(df_amazon, f"Salario minimo choferes Amazon | Semana {semana_corte}")
                             pintar_resumen_unidades(df_amazon, f"Resumen de Unidades | Amazon | Semana {semana_corte}")
 
-                            # --- BLOQUE MERCADO LIBRE ---
                             titulo_ml = f"{titulo_periodo} | Mercado Libre"
                             pintar_tabla_detalle(df_ml, titulo_ml)
                             pintar_tabla_salarios(df_ml, f"Salario minimo choferes Mercado Libre | Semana {semana_corte}")
@@ -1234,7 +1211,6 @@ if es_admin:
 
                             return pdf.output(dest='S').encode('latin1')
 
-                        # Botones de descarga
                         with col_btn1:
                             st.download_button(
                                 label="📊 Descargar Sábana en Excel",
