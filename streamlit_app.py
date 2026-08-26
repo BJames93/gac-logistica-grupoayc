@@ -864,9 +864,10 @@ if es_admin:
                     }
                     df_rep = df_rep.rename(columns=column_map)
 
-                    # Filtrar por rango de fechas seleccionado en la interfaz
-                    col_fecha_base = "Hora_Arribo" if "Hora_Arribo" in df_rep.columns else "fecha_filtro"
-                    df_rep["fecha_raw"] = pd.to_datetime(df_rep[col_fecha_base]).dt.tz_localize(None).dt.date
+                    # Determinar columna de fecha disponible de forma segura
+                    col_fecha = "Hora_Arribo" if "Hora_Arribo" in df_rep.columns else ("fecha_filtro" if "fecha_filtro" in df_rep.columns else "fecha")
+                    df_rep["fecha_raw"] = pd.to_datetime(df_rep[col_fecha]).dt.tz_localize(None).dt.date
+                    
                     mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
                     df_periodo = df_rep.loc[mascara_fechas].copy()
                     
@@ -961,7 +962,7 @@ if es_admin:
                         df_periodo["Retencion_ISR"] = df_periodo["Subtotal"] * 0.0125 if es_resico else 0.0
                         df_periodo["Total"] = (df_periodo["Subtotal"] + df_periodo["IVA"]) - df_periodo["Retencion_ISR"]
 
-                        # Guardar la fecha con formato de día para la matriz antes de eliminar la columna técnica
+                        # Crear Día de la Semana de forma segura desde fecha_raw
                         df_periodo["Dia_Semana"] = pd.to_datetime(df_periodo["fecha_raw"]).dt.strftime('%A')
                         df_periodo = df_periodo.drop(columns=["fecha_filtro", "fecha_raw"], errors="ignore")
                         
