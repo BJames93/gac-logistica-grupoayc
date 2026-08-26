@@ -839,154 +839,31 @@ if es_admin:
             
         if st.button("Generar Conciliación"):
             try:
-                # 1. CONSULTA DIRECTA A LA TABLA BASE CORRECTA ('registro_operacion')
-                res_reporte = supabase.table("registro_operacion").select("*").execute()
-                res_tarifas = supabase.table("tarifas").select("*").execute()
+                # El sistema decide qué vista consultar según el radio button
+                tabla_consultar = "vista_reporte_ayc" if es_resico else "vista_reporte_bb"
                 
+                # Consultamos la vista directa (Supabase ya hizo los cálculos)
+                res_reporte = supabase.table(tabla_consultar).select("*").execute()
                 df_rep = pd.DataFrame(res_reporte.data)
-                df_tarifas = pd.DataFrame(res_tarifas.data)
                 
                 if not df_rep.empty:
-                    # Mapeo de columnas con nombres en minúscula/mayúscula
-                    column_map = {
-                        "hora_llegada_hub": "Hora_Arribo",
-                        "hora_arribo": "Hora_Arribo",
-                        "ambulancia": "Es_Ambulancia",
-                        "costal": "Es_Costal",
-                        "es_ambulancia": "Es_Ambulancia",
-                        "es_costal": "Es_Costal",
-                        "paquetes_cargados": "Paquetes",
-                        "paquetes": "Paquetes",
-                        "paradas": "Paradas",
-                        "status_operacion": "Condicion",
-                        "condicion": "Condicion",
-                        "placas": "Placas",
-                        "placa": "Placas",
-                        "tipo_unidad": "Tipo",
-                        "tipo": "Tipo",
-                        "marca": "Marca_del_Vehiculo",
-                        "marca_del_vehiculo": "Marca_del_Vehiculo",
-                        "conductor": "Conductor",
-                        "nombre_driver": "Conductor",
-                        "tipo_cliente": "Cliente",
-                        "cliente": "Cliente"
-                    }
-                    df_rep = df_rep.rename(columns=column_map)
-
-                    # DETECCIÓN AUTOMÁTICA Y ROBUSTA DE LA COLUMNA DE FECHA
-                    posibles_fechas = [c for c in df_rep.columns if any(k in c.lower() for k in ["hora", "fecha", "arribo", "created", "captura"])]
-                    
-                    if posibles_fechas:
-                        col_fecha_usar = posibles_fechas[0]
-                    else:
-                        col_fecha_usar = df_rep.select_dtypes(include=['datetime', 'object']).columns[0]
-
-                    # Convertir a fecha pura (YYYY-MM-DD) sin zona horaria
-                    df_rep["fecha_raw"] = pd.to_datetime(df_rep[col_fecha_usar], errors='coerce').dt.tz_localize(None).dt.date
-                    
-                    # Filtrar por rango de fechas seleccionado en la interfaz
+                    # Filtramos por las fechas seleccionadas en la interfaz
+                    df_rep["fecha_raw"] = pd.to_datetime(df_rep["fecha_filtro"]).dt.tz_localize(None).dt.date
                     mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
                     df_periodo = df_rep.loc[mascara_fechas].copy()
                     
+                    # Guardamos la fecha con formato de día para la matriz antes de eliminar la columna técnica
+                    df_periodo["Dia_Semana"] = pd.to_datetime(df_periodo["fecha_filtro"]).dt.strftime('%A')
+                    
+                    # Eliminamos columnas técnicas (errors="ignore" evita fallos si no existen)
+                    df_periodo = df_periodo.drop(columns=["fecha_filtro", "fecha_raw"], errors="ignore")
+                    
                     if not df_periodo.empty:
-                        # Pre-procesar catálogo de tarifas para evitar errores con fechas límite (9999-12-31)
-                        if not df_tarifas.empty:
-                            df_t = df_tarifas.copy()
-                            df_t["empresa_norm"] = df_t["nombre_empresa"].astype(str).str.replace(" ", "").str.upper()
-                            df_t["cliente_norm"] = df_t["tipo_cliente"].astype(str).str.strip().str.upper()
-                            df_t["placa_norm"] = df_t["placa"].astype(str).str.strip().str.upper()
-                            df_t["tipo_norm"] = df_t["tipo_unidad"].astype(str).str.strip().str.upper()
-
-                            def safe_parse_date(d_val, is_end=False):
-                                if pd.isna(d_val) or not d_val:
-                                    return pd.to_datetime('2099-12-31').date() if is_end else pd.to_datetime('2000-01-01').date()
-                                s = str(d_val).split('T')[0].split(' ')[0]
-                                if s.startswith('9999') or s.startswith('2999'):
-                                    return pd.to_datetime('2099-12-31').date()
-                                try:
-                                    return pd.to_datetime(s).date()
-                                except Exception:
-                                    return pd.to_datetime('2099-12-31').date() if is_end else pd.to_datetime('2000-01-01').date()
-
-                            df_t["f_ini"] = df_t["fecha_inicio"].apply(lambda x: safe_parse_date(x, False))
-                            df_t["f_fin"] = df_t["fecha_fin"].apply(lambda x: safe_parse_date(x, True))
-                        else:
-                            df_t = pd.DataFrame()
-
-                        # 2. FUNCIÓN DE ASIGNACIÓN DINÁMICA DE TARIFAS
-                        def determinar_monto(row):
-                            es_costal = str(row.get("Es_Costal")).strip().lower() in ["true", "1", "t"]
-                            es_ambulancia = str(row.get("Es_Ambulancia")).strip().lower() in ["true", "1", "t"]
-
-                            # Regla 1: Costal ($900.00 fijo)
-                            if es_costal:
-                                return 900.0
-                            
-                            # Regla 2: Ambulancia (monto variable capturado)
-                            if es_ambulancia:
-                                val_amb = row.get("costo_ambulancia_variable")
-                                try:
-                                    if pd.notna(val_amb) and float(val_amb) > 0:
-                                        return float(val_amb)
-                                except (ValueError, TypeError):
-                                    pass
-                                return 0.0
-
-                            kw_empresa = "AYC" if es_resico else "BOULDER"
-                            cliente_val = str(row.get("Cliente", "")).strip().upper()
-                            placa_val = str(row.get("Placas", "")).strip().upper()
-                            tipo_val = str(row.get("Tipo", "")).strip().upper()
-                            fecha_raw_val = row.get("fecha_raw")
-
-                            if df_t.empty or cliente_val in ["", "NONE", "NAN"]:
-                                return 0.0
-
-                            # Filtrar catálogo por empresa, cliente y vigencia
-                            filtro_base = (
-                                (df_t["empresa_norm"].str.contains(kw_empresa, na=False)) &
-                                (df_t["cliente_norm"] == cliente_val) &
-                                (df_t["f_ini"] <= fecha_raw_val) &
-                                (df_t["f_fin"] >= fecha_raw_val)
-                            )
-                            df_candidatas = df_t.loc[filtro_base]
-
-                            if df_candidatas.empty:
-                                return 0.0
-
-                            # Prioridad 3: Coincidencia por Placa
-                            if placa_val not in ["", "NONE", "NAN"]:
-                                match_placa = df_candidatas[df_candidatas["placa_norm"] == placa_val]
-                                if not match_placa.empty:
-                                    return float(match_placa.iloc[0]["monto"])
-
-                            # Prioridad 4: Coincidencia general por Tipo de Unidad
-                            match_tipo = df_candidatas[
-                                (df_candidatas["tipo_norm"] == tipo_val) & 
-                                (df_candidatas["placa_norm"].isin(["", "NONE", "NAN"]) | df_candidatas["placa"].isna())
-                            ]
-                            if not match_tipo.empty:
-                                return float(match_tipo.iloc[0]["monto"])
-
-                            return 0.0
-
-                        # Aplicar asignación de monto y cálculos financieros en Python
-                        df_periodo["Monto_por_Unidad"] = df_periodo.apply(determinar_monto, axis=1)
-                        df_periodo["Monto_Final_Unidad"] = df_periodo["Monto_por_Unidad"]
-                        df_periodo["Costo_IMSS"] = 0.0
-                        df_periodo["Subtotal"] = df_periodo["Monto_por_Unidad"]
-                        
-                        df_periodo["IVA"] = df_periodo["Subtotal"] * 0.16
-                        df_periodo["Retencion_ISR"] = df_periodo["Subtotal"] * 0.0125 if es_resico else 0.0
-                        df_periodo["Total"] = (df_periodo["Subtotal"] + df_periodo["IVA"]) - df_periodo["Retencion_ISR"]
-
-                        # Crear Día de la Semana de forma segura desde fecha_raw
-                        df_periodo["Dia_Semana"] = pd.to_datetime(df_periodo["fecha_raw"]).dt.strftime('%A')
-                        df_periodo = df_periodo.drop(columns=["fecha_filtro", "fecha_raw"], errors="ignore")
-                        
                         dia_ini = fecha_ini.strftime('%d')
                         dia_fin = fecha_fin.strftime('%d')
                         meses = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
                         mes_texto = meses[fecha_fin.month]
+                        
                         titulo_periodo = f"Corte {dia_ini} al {dia_fin} de {mes_texto} | Semana {semana_corte}"
                         
                         st.divider()
@@ -1010,7 +887,7 @@ if es_admin:
                         
                         # --- SECCIÓN 2: MERCADO LIBRE ---
                         st.subheader(f"{titulo_periodo} | Mercado Libre")
-                        df_ml = df_periodo[df_periodo["Cliente"] == "Mercado Libre"].copy()
+                        df_ml = df_periodo[df_periodo["Cliente"] == "Marketplace" if "Cliente" in df_periodo.columns and False else df_periodo["Cliente"] == "Mercado Libre"].copy()
                         
                         if not df_ml.empty:
                             st.dataframe(df_ml, use_container_width=True)
@@ -1060,14 +937,15 @@ if es_admin:
                             * **Servicios de Costales:** {total_costales}
                             """)
 
-                        # --- MATRIZ DE SERVICIOS POR DÍA DE LA SEMANA ---
+                        # --- NUEVO CÓDIGO: MATRIZ DE SERVICIOS POR DÍA DE LA SEMANA ---
                         st.write("---")
                         st.subheader("📅 Distribución Estructurada de Servicios por Día")
                         
+                        # Clasificamos cada registro en su categoría exclusiva
                         def clasificar_servicio(row):
-                            if str(row.get("Es_Ambulancia")).strip().lower() in ["true", "1", "t"]:
+                            if row.get("Es_Ambulancia") == True:
                                 return "Ambulancia"
-                            elif str(row.get("Es_Costal")).strip().lower() in ["true", "1", "t"]:
+                            elif row.get("Es_Costal") == True:
                                 return "Costal"
                             else:
                                 tipo = str(row.get("Tipo", "")).upper()
@@ -1075,39 +953,51 @@ if es_admin:
                                     return "Small"
                                 elif "LARGE" in tipo:
                                     return "Large"
-                                return "Otros"
+                            return "Otros"
 
                         df_periodo["Categoria_Servicio"] = df_periodo.apply(clasificar_servicio, axis=1)
 
+                        # Mapeo de días en inglés a español para el ordenamiento correcto de las columnas
                         dias_ordenados = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
                         dias_espanol = {
                             "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles", 
                             "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"
                         }
                         
+                        # Categorías fijas de filas
                         categorias_filas = ["Small", "Large", "Ambulancia", "Costal", "Otros"]
 
+                        # Creamos tabla pivote cruzada
                         if not df_periodo.empty:
                             matriz_pivot = pd.crosstab(
                                 index=df_periodo["Categoria_Servicio"],
                                 columns=df_periodo["Dia_Semana"]
                             )
+                            
+                            # Reindexamos columnas y filas para garantizar consistencia y orden cronológico
                             matriz_pivot = matriz_pivot.reindex(index=categorias_filas, columns=dias_ordenados, fill_value=0)
+                            # Renombramos las columnas a español
                             matriz_pivot = matriz_pivot.rename(columns=dias_espanol)
                             
-                            if "Otros" in matriz_pivot.index and matriz_pivot.loc["Otros"].sum() == 0:
+                            # Removemos la fila 'Otros' si quedó completamente en ceros para limpiar el diseño
+                            if matriz_pivot.loc["Otros"].sum() == 0:
                                 matriz_pivot = matriz_pivot.drop(index="Otros")
 
+                            # Agregamos totales de filas y columnas
                             matriz_pivot["Total General"] = matriz_pivot.sum(axis=1)
                             matriz_pivot.loc["TOTAL SERVICIOS"] = matriz_pivot.sum(axis=0)
                             
+                            # Desplegar la tabla estructurada en la app
                             st.dataframe(matriz_pivot, use_container_width=True)
-
-                        # --- MÓDULO DE EXPORTACIÓN (EXCEL Y PDF) ---
+                        
+                        # ==========================================
+                        # MÓDULO DE EXPORTACIÓN (EXCEL Y PDF)
+                        # ==========================================
                         st.write("---")
                         st.subheader("📥 Exportar Reportes")
                         col_btn1, col_btn2 = st.columns(2)
                         
+                        # 1. FUNCIÓN PARA EXCEL
                         def generar_excel():
                             output = io.BytesIO()
                             with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -1116,6 +1006,7 @@ if es_admin:
                                 if not df_ml.empty:
                                     df_ml.to_excel(writer, sheet_name='Mercado Libre', index=False)
                                 
+                                # Pestaña de resumen
                                 df_resumen = pd.DataFrame([{
                                     "Empresa": nombre_empresa_corte,
                                     "Periodo": titulo_periodo,
@@ -1132,11 +1023,15 @@ if es_admin:
                                 df_resumen.to_excel(writer, sheet_name='Resumen Financiero', index=False)
                             return output.getvalue()
                             
+                        # 2. FUNCIÓN PARA PDF (Hoja 1: Resumen Global | Hoja 2+: Detalle completo continuo)
                         def generar_pdf():
-                            pdf = FPDF(orientation='L', unit='mm', format='A4')
+                            pdf = FPDF(orientation='L', unit='mm', format='A4')  # Orientación horizontal
                             pdf.set_auto_page_break(auto=True, margin=15)
-                            ANCHO_UTIL = 277
+                            ANCHO_UTIL = 277  # ancho útil aproximado en A4 horizontal
 
+                            # =========================================================
+                            # HOJA 1: RESUMEN GLOBAL
+                            # =========================================================
                             pdf.add_page()
                             pdf.set_font("Arial", 'B', 16)
                             pdf.cell(ANCHO_UTIL, 10, txt=f"Reporte de Conciliacion - {nombre_empresa_corte}", ln=True, align='C')
@@ -1152,8 +1047,12 @@ if es_admin:
                                 pdf.cell(100, 10, label, border=1)
                                 pdf.cell(50, 10, f"${val:,.2f}", border=1, ln=True, align='R')
 
+                            # =========================================================
+                            # HOJA 2: INICIO DE DATOS DETALLADOS (Flujo continuo)
+                            # =========================================================
                             pdf.add_page()
 
+                            # Definición de columnas para la tabla grande (19 columnas solicitadas)
                             columnas_tabla = [
                                 ("Hora_Arribo",         "Hora Arribo",   16, 'C'),
                                 ("Ambulancia",          "Ambul.",        10, 'C'),
@@ -1181,10 +1080,11 @@ if es_admin:
                             ALTO_FILA = 5
 
                             def fmt_valor(clave, valor):
+                                """Formatea el valor según el tipo de columna."""
                                 if clave == "__SEMANA__":
                                     return str(semana_corte)
                                 if clave in ("Ambulancia", "Costal", "Es_Ambulancia", "Es_Costal"):
-                                    return "SI" if str(valor).lower() in ["true", "1", "t"] else "NO"
+                                    return "SI" if valor else "NO"
                                 if clave in ("Monto_por_Unidad", "Monto_Final_Unidad", "Costo_IMSS", "Subtotal", "IVA", "Retencion_ISR", "Total"):
                                     try:
                                         return f"${float(valor or 0):,.2f}"
@@ -1218,13 +1118,13 @@ if es_admin:
                                 pdf.set_font("Arial", '', FS_DATA)
 
                                 for _, row in df.iterrows():
-                                    es_amb = str(row.get("Es_Ambulancia")).lower() in ["true", "1", "t"]
-                                    es_cos = str(row.get("Es_Costal")).lower() in ["true", "1", "t"]
+                                    es_amb = row.get("Ambulancia") or row.get("Es_Ambulancia")
+                                    es_cos = row.get("Costal") or row.get("Es_Costal")
                                     
                                     if es_amb:
-                                        pdf.set_fill_color(173, 216, 230)
+                                        pdf.set_fill_color(173, 216, 230)  # Azul claro
                                     elif es_cos:
-                                        pdf.set_fill_color(255, 200, 200)
+                                        pdf.set_fill_color(255, 200, 200)  # Rojo claro
                                     else:
                                         pdf.set_fill_color(255, 255, 255)
 
@@ -1234,6 +1134,7 @@ if es_admin:
                                         pdf.cell(ancho, ALTO_FILA, texto, 1, 0, alineacion, fill=True)
                                     pdf.ln()
 
+                                # --- Totales por columna ---
                                 pdf.set_font("Arial", 'B', FS_DATA)
                                 columnas_suma = ["Monto_por_Unidad", "Monto_Final_Unidad", "Costo_IMSS", "Subtotal", "IVA", "Retencion_ISR", "Total"]
                                 ancho_label = sum(a for c, h, a, al in columnas_tabla if c not in columnas_suma and c != "__SEMANA__")
@@ -1318,11 +1219,13 @@ if es_admin:
                                 pdf.cell(w_val, 6, str(canceladas), 1, 1, 'C', fill=True)
                                 pdf.ln(15)
 
+                            # --- BLOQUE AMAZON ---
                             titulo_amazon = f"{titulo_periodo} | Amazon"
                             pintar_tabla_detalle(df_amazon, titulo_amazon)
                             pintar_tabla_salarios(df_amazon, f"Salario minimo choferes Amazon | Semana {semana_corte}")
                             pintar_resumen_unidades(df_amazon, f"Resumen de Unidades | Amazon | Semana {semana_corte}")
 
+                            # --- BLOQUE MERCADO LIBRE ---
                             titulo_ml = f"{titulo_periodo} | Mercado Libre"
                             pintar_tabla_detalle(df_ml, titulo_ml)
                             pintar_tabla_salarios(df_ml, f"Salario minimo choferes Mercado Libre | Semana {semana_corte}")
@@ -1330,6 +1233,7 @@ if es_admin:
 
                             return pdf.output(dest='S').encode('latin1')
 
+                        # Botones de descarga
                         with col_btn1:
                             st.download_button(
                                 label="📊 Descargar Sábana en Excel",
