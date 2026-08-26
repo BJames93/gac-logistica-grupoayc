@@ -839,15 +839,15 @@ if es_admin:
             
         if st.button("Generar Conciliación"):
             try:
-                # 1. CONSULTA DIRECTA A TABLAS BASE (SIN USAR VISTAS SQL)
-                res_reporte = supabase.table("registro_operacion").select("*").execute()
+                # 1. CONSULTA DIRECTA A TABLAS BASE (SIN DEPENDER DE VISTAS SQL)
+                res_reporte = supabase.table("operaciones").select("*").execute()
                 res_tarifas = supabase.table("tarifas").select("*").execute()
                 
                 df_rep = pd.DataFrame(res_reporte.data)
                 df_tarifas = pd.DataFrame(res_tarifas.data)
                 
                 if not df_rep.empty:
-                    # Normalizar nombres de columnas si vienen en minúsculas desde la tabla base
+                    # Mapeo de columnas con nombres en minúscula/mayúscula
                     column_map = {
                         "hora_arribo": "Hora_Arribo",
                         "es_ambulancia": "Es_Ambulancia",
@@ -864,10 +864,18 @@ if es_admin:
                     }
                     df_rep = df_rep.rename(columns=column_map)
 
-                    # Determinar columna de fecha disponible de forma segura
-                    col_fecha = "Hora_Arribo" if "Hora_Arribo" in df_rep.columns else ("fecha_filtro" if "fecha_filtro" in df_rep.columns else "fecha")
-                    df_rep["fecha_raw"] = pd.to_datetime(df_rep[col_fecha]).dt.tz_localize(None).dt.date
+                    # DETECCIÓN AUTOMÁTICA Y ROBUSTA DE LA COLUMNA DE FECHA
+                    posibles_fechas = [c for c in df_rep.columns if any(k in c.lower() for k in ["hora", "fecha", "arribo", "created"])]
                     
+                    if posibles_fechas:
+                        col_fecha_usar = posibles_fechas[0]
+                    else:
+                        col_fecha_usar = df_rep.select_dtypes(include=['datetime', 'object']).columns[0]
+
+                    # Convertir a fecha pura (YYYY-MM-DD) sin zona horaria
+                    df_rep["fecha_raw"] = pd.to_datetime(df_rep[col_fecha_usar], errors='coerce').dt.tz_localize(None).dt.date
+                    
+                    # Filtrar por rango de fechas seleccionado en la interfaz
                     mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
                     df_periodo = df_rep.loc[mascara_fechas].copy()
                     
