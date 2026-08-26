@@ -839,22 +839,39 @@ if es_admin:
             
         if st.button("Generar Conciliación"):
             try:
-                # 1. Consultar Vistas y Tabla Tarifas desde Supabase
-                tabla_consultar = "vista_reporte_ayc" if es_resico else "vista_reporte_bb"
-                res_reporte = supabase.table(tabla_consultar).select("*").execute()
+                # 1. CONSULTA DIRECTA A TABLAS BASE (SIN USAR VISTAS SQL)
+                res_reporte = supabase.table("operaciones").select("*").execute()
                 res_tarifas = supabase.table("tarifas").select("*").execute()
                 
                 df_rep = pd.DataFrame(res_reporte.data)
                 df_tarifas = pd.DataFrame(res_tarifas.data)
                 
                 if not df_rep.empty:
-                    # Normalización de fechas del reporte por hora de arribo o fecha de captura
-                    df_rep["fecha_raw"] = pd.to_datetime(df_rep["Hora_Arribo"].fillna(df_rep["fecha_filtro"])).dt.date
+                    # Normalizar nombres de columnas si vienen en minúsculas desde la tabla base
+                    column_map = {
+                        "hora_arribo": "Hora_Arribo",
+                        "es_ambulancia": "Es_Ambulancia",
+                        "es_costal": "Es_Costal",
+                        "paquetes": "Paquetes",
+                        "paradas": "Paradas",
+                        "condicion": "Condicion",
+                        "placas": "Placas",
+                        "placa": "Placas",
+                        "tipo": "Tipo",
+                        "marca_del_vehiculo": "Marca_del_Vehiculo",
+                        "conductor": "Conductor",
+                        "cliente": "Cliente"
+                    }
+                    df_rep = df_rep.rename(columns=column_map)
+
+                    # Filtrar por rango de fechas seleccionado en la interfaz
+                    col_fecha_base = "Hora_Arribo" if "Hora_Arribo" in df_rep.columns else "fecha_filtro"
+                    df_rep["fecha_raw"] = pd.to_datetime(df_rep[col_fecha_base]).dt.tz_localize(None).dt.date
                     mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
                     df_periodo = df_rep.loc[mascara_fechas].copy()
                     
                     if not df_periodo.empty:
-                        # Pre-procesamiento seguro de la tabla de tarifas para evitar OutOfBoundsDatetime (9999-12-31)
+                        # Pre-procesar catálogo de tarifas para evitar errores con fechas límite (9999-12-31)
                         if not df_tarifas.empty:
                             df_t = df_tarifas.copy()
                             df_t["empresa_norm"] = df_t["nombre_empresa"].astype(str).str.replace(" ", "").str.upper()
@@ -878,9 +895,8 @@ if es_admin:
                         else:
                             df_t = pd.DataFrame()
 
-                        # 2. FUNCIÓN DE ASIGNACIÓN JERÁRQUICA DE TARIFAS (VERSIÓN DEFINITIVA)
+                        # 2. FUNCIÓN DE ASIGNACIÓN DINÁMICA DE TARIFAS
                         def determinar_monto(row):
-                            # Normalizar flags de ambulancia y costal tolerando nulos/NaN
                             es_costal = str(row.get("Es_Costal")).strip().lower() in ["true", "1", "t"]
                             es_ambulancia = str(row.get("Es_Ambulancia")).strip().lower() in ["true", "1", "t"]
 
@@ -898,7 +914,6 @@ if es_admin:
                                     pass
                                 return 0.0
 
-                            # Datos para búsqueda en catálogo de Tarifas
                             kw_empresa = "AYC" if es_resico else "BOULDER"
                             cliente_val = str(row.get("Cliente", "")).strip().upper()
                             placa_val = str(row.get("Placas", "")).strip().upper()
@@ -908,7 +923,7 @@ if es_admin:
                             if df_t.empty or cliente_val in ["", "NONE", "NAN"]:
                                 return 0.0
 
-                            # Filtro base flexible por Empresa, Cliente y Vigencia
+                            # Filtrar catálogo por empresa, cliente y vigencia
                             filtro_base = (
                                 (df_t["empresa_norm"].str.contains(kw_empresa, na=False)) &
                                 (df_t["cliente_norm"] == cliente_val) &
@@ -920,13 +935,13 @@ if es_admin:
                             if df_candidatas.empty:
                                 return 0.0
 
-                            # Prioridad 3: Coincidencia específica por PLACA
+                            # Prioridad 3: Coincidencia por Placa
                             if placa_val not in ["", "NONE", "NAN"]:
                                 match_placa = df_candidatas[df_candidatas["placa_norm"] == placa_val]
                                 if not match_placa.empty:
                                     return float(match_placa.iloc[0]["monto"])
 
-                            # Prioridad 4: Coincidencia general por TIPO DE UNIDAD (donde no hay placa asignada)
+                            # Prioridad 4: Coincidencia general por Tipo de Unidad
                             match_tipo = df_candidatas[
                                 (df_candidatas["tipo_norm"] == tipo_val) & 
                                 (df_candidatas["placa_norm"].isin(["", "NONE", "NAN"]) | df_candidatas["placa"].isna())
@@ -936,22 +951,20 @@ if es_admin:
 
                             return 0.0
 
-                        # Aplicar asignación de monto fila por fila
+                        # Aplicar asignación de monto y cálculos financieros en Python
                         df_periodo["Monto_por_Unidad"] = df_periodo.apply(determinar_monto, axis=1)
                         df_periodo["Monto_Final_Unidad"] = df_periodo["Monto_por_Unidad"]
                         df_periodo["Costo_IMSS"] = 0.0
                         df_periodo["Subtotal"] = df_periodo["Monto_por_Unidad"]
                         
-                        # Cálculos Fiscales en Python
                         df_periodo["IVA"] = df_periodo["Subtotal"] * 0.16
                         df_periodo["Retencion_ISR"] = df_periodo["Subtotal"] * 0.0125 if es_resico else 0.0
                         df_periodo["Total"] = (df_periodo["Subtotal"] + df_periodo["IVA"]) - df_periodo["Retencion_ISR"]
-                        
-                        # Preparar vista de Día de la Semana
-                        df_periodo["Dia_Semana"] = pd.to_datetime(df_periodo["fecha_raw"]).dt.strftime('%A')
-                        df_periodo = df_periodo.drop(columns=["fecha_filtro", "fecha_raw", "costo_ambulancia_variable"], errors="ignore")
 
-                        # Despliegue de datos en la app
+                        # Guardar la fecha con formato de día para la matriz antes de eliminar la columna técnica
+                        df_periodo["Dia_Semana"] = pd.to_datetime(df_periodo["fecha_raw"]).dt.strftime('%A')
+                        df_periodo = df_periodo.drop(columns=["fecha_filtro", "fecha_raw"], errors="ignore")
+                        
                         dia_ini = fecha_ini.strftime('%d')
                         dia_fin = fecha_fin.strftime('%d')
                         meses = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
@@ -960,9 +973,10 @@ if es_admin:
                         
                         st.divider()
                         
-                        # SECCIÓN AMAZON Y MERCADO LIBRE
+                        # --- SECCIÓN 1: AMAZON ---
                         st.subheader(f"{titulo_periodo} | Amazon")
                         df_amazon = df_periodo[df_periodo["Cliente"] == "Amazon"].copy()
+                        
                         if not df_amazon.empty:
                             st.dataframe(df_amazon, use_container_width=True)
                             st.write("**Resumen Financiero - Amazon**")
@@ -976,8 +990,10 @@ if es_admin:
                             
                         st.divider()
                         
+                        # --- SECCIÓN 2: MERCADO LIBRE ---
                         st.subheader(f"{titulo_periodo} | Mercado Libre")
                         df_ml = df_periodo[df_periodo["Cliente"] == "Mercado Libre"].copy()
+                        
                         if not df_ml.empty:
                             st.dataframe(df_ml, use_container_width=True)
                             st.write("**Resumen Financiero - Mercado Libre**")
@@ -990,14 +1006,15 @@ if es_admin:
                             st.info("No hay registros de Mercado Libre para este periodo.")
                             
                         st.divider()
-
-                        # TOTALES GLOBALES
+                        
+                        # --- GRAN TOTAL Y RESUMEN DE SERVICIOS ---
                         st.subheader(f"Gran Total del Periodo - {nombre_empresa_corte}")
                         t_sub = df_periodo['Subtotal'].sum()
                         t_iva = df_periodo['IVA'].sum()
                         t_ret = df_periodo['Retencion_ISR'].sum()
                         t_tot = df_periodo['Total'].sum()
                         
+                        # Métricas operativas calculadas dinámicamente
                         total_servicios = len(df_periodo)
                         total_small = len(df_periodo[df_periodo['Tipo'].astype(str).str.upper() == 'SMALL'])
                         total_large = len(df_periodo[df_periodo['Tipo'].astype(str).str.upper() == 'LARGE'])
@@ -1005,17 +1022,19 @@ if es_admin:
                         total_costales = len(df_periodo[df_periodo['Es_Costal'] == True])
                         
                         col_fin, col_ope = st.columns(2)
+                        
                         with col_fin:
+                            st.markdown("**Desglose Financiero Global:**")
                             st.markdown(f"""
-                            **Desglose Financiero Global:**
                             * **SUBTOTAL:** ${t_sub:,.2f}
                             * **IVA:** ${t_iva:,.2f}
                             * **RETENCIÓN:** ${t_ret:,.2f}
                             * **TOTAL FINAL:** **${t_tot:,.2f}**
                             """)
+                            
                         with col_ope:
+                            st.markdown("**Resumen Operativo de Servicios:**")
                             st.markdown(f"""
-                            **Resumen Operativo de Servicios:**
                             * **Total de Servicios:** {total_servicios} viajes
                             * **Unidades Small:** {total_small}
                             * **Unidades Large:** {total_large}
@@ -1023,30 +1042,50 @@ if es_admin:
                             * **Servicios de Costales:** {total_costales}
                             """)
 
-                        # MATRIZ POR DÍA DE LA SEMANA
+                        # --- MATRIZ DE SERVICIOS POR DÍA DE LA SEMANA ---
                         st.write("---")
                         st.subheader("📅 Distribución Estructurada de Servicios por Día")
+                        
                         def clasificar_servicio(row):
-                            if row.get("Es_Ambulancia") == True: return "Ambulancia"
-                            if row.get("Es_Costal") == True: return "Costal"
-                            tipo = str(row.get("Tipo", "")).upper()
-                            if "SMALL" in tipo: return "Small"
-                            if "LARGE" in tipo: return "Large"
-                            return "Otros"
+                            if str(row.get("Es_Ambulancia")).strip().lower() in ["true", "1", "t"]:
+                                return "Ambulancia"
+                            elif str(row.get("Es_Costal")).strip().lower() in ["true", "1", "t"]:
+                                return "Costal"
+                            else:
+                                tipo = str(row.get("Tipo", "")).upper()
+                                if "SMALL" in tipo:
+                                    return "Small"
+                                elif "LARGE" in tipo:
+                                    return "Large"
+                                return "Otros"
 
                         df_periodo["Categoria_Servicio"] = df_periodo.apply(clasificar_servicio, axis=1)
-                        dias_ordenados = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-                        dias_espanol = {"Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles", "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"}
-                        
-                        matriz_pivot = pd.crosstab(index=df_periodo["Categoria_Servicio"], columns=df_periodo["Dia_Semana"])
-                        matriz_pivot = matriz_pivot.reindex(index=["Small", "Large", "Ambulancia", "Costal", "Otros"], columns=dias_ordenados, fill_value=0).rename(columns=dias_espanol)
-                        if "Otros" in matriz_pivot.index and matriz_pivot.loc["Otros"].sum() == 0:
-                            matriz_pivot = matriz_pivot.drop(index="Otros")
-                        matriz_pivot["Total General"] = matriz_pivot.sum(axis=1)
-                        matriz_pivot.loc["TOTAL SERVICIOS"] = matriz_pivot.sum(axis=0)
-                        st.dataframe(matriz_pivot, use_container_width=True)
 
-                        # MÓDULO DE EXPORTACIÓN (EXCEL Y PDF)
+                        dias_ordenados = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                        dias_espanol = {
+                            "Monday": "Lunes", "Tuesday": "Martes", "Wednesday": "Miércoles", 
+                            "Thursday": "Jueves", "Friday": "Viernes", "Saturday": "Sábado", "Sunday": "Domingo"
+                        }
+                        
+                        categorias_filas = ["Small", "Large", "Ambulancia", "Costal", "Otros"]
+
+                        if not df_periodo.empty:
+                            matriz_pivot = pd.crosstab(
+                                index=df_periodo["Categoria_Servicio"],
+                                columns=df_periodo["Dia_Semana"]
+                            )
+                            matriz_pivot = matriz_pivot.reindex(index=categorias_filas, columns=dias_ordenados, fill_value=0)
+                            matriz_pivot = matriz_pivot.rename(columns=dias_espanol)
+                            
+                            if "Otros" in matriz_pivot.index and matriz_pivot.loc["Otros"].sum() == 0:
+                                matriz_pivot = matriz_pivot.drop(index="Otros")
+
+                            matriz_pivot["Total General"] = matriz_pivot.sum(axis=1)
+                            matriz_pivot.loc["TOTAL SERVICIOS"] = matriz_pivot.sum(axis=0)
+                            
+                            st.dataframe(matriz_pivot, use_container_width=True)
+
+                        # --- MÓDULO DE EXPORTACIÓN (EXCEL Y PDF) ---
                         st.write("---")
                         st.subheader("📥 Exportar Reportes")
                         col_btn1, col_btn2 = st.columns(2)
@@ -1127,7 +1166,7 @@ if es_admin:
                                 if clave == "__SEMANA__":
                                     return str(semana_corte)
                                 if clave in ("Ambulancia", "Costal", "Es_Ambulancia", "Es_Costal"):
-                                    return "SI" if valor else "NO"
+                                    return "SI" if str(valor).lower() in ["true", "1", "t"] else "NO"
                                 if clave in ("Monto_por_Unidad", "Monto_Final_Unidad", "Costo_IMSS", "Subtotal", "IVA", "Retencion_ISR", "Total"):
                                     try:
                                         return f"${float(valor or 0):,.2f}"
@@ -1161,8 +1200,8 @@ if es_admin:
                                 pdf.set_font("Arial", '', FS_DATA)
 
                                 for _, row in df.iterrows():
-                                    es_amb = row.get("Ambulancia") or row.get("Es_Ambulancia")
-                                    es_cos = row.get("Costal") or row.get("Es_Costal")
+                                    es_amb = str(row.get("Es_Ambulancia")).lower() in ["true", "1", "t"]
+                                    es_cos = str(row.get("Es_Costal")).lower() in ["true", "1", "t"]
                                     
                                     if es_amb:
                                         pdf.set_fill_color(173, 216, 230)
