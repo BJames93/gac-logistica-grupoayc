@@ -840,7 +840,7 @@ if es_admin:
         if st.button("Generar Conciliación"):
             try:
                 # 1. CONSULTA DIRECTA A TABLAS BASE (SIN USAR VISTAS SQL)
-                res_reporte = supabase.table("operaciones").select("*").execute()
+                res_reporte = supabase.table("registro_operacion").select("*").execute()
                 res_tarifas = supabase.table("tarifas").select("*").execute()
                 
                 df_rep = pd.DataFrame(res_reporte.data)
