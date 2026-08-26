@@ -840,7 +840,7 @@ if es_admin:
             
         if st.button("Generar Conciliación"):
             try:
-                # 1. Consultar Vistas y Tabla Tarifas
+                # 1. Consultar Vistas y Tabla Tarifas desde Supabase
                 tabla_consultar = "vista_reporte_ayc" if es_resico else "vista_reporte_bb"
                 res_reporte = supabase.table(tabla_consultar).select("*").execute()
                 res_tarifas = supabase.table("tarifas").select("*").execute()
@@ -849,19 +849,43 @@ if es_admin:
                 df_tarifas = pd.DataFrame(res_tarifas.data)
                 
                 if not df_rep.empty:
-                    # Normalización de fechas para filtrado por fecha real de servicio
+                    # Normalización de fechas del reporte
                     df_rep["fecha_raw"] = pd.to_datetime(df_rep["Hora_Arribo"].fillna(df_rep["fecha_filtro"])).dt.date
                     mascara_fechas = (df_rep["fecha_raw"] >= fecha_ini) & (df_rep["fecha_raw"] <= fecha_fin)
                     df_periodo = df_rep.loc[mascara_fechas].copy()
                     
                     if not df_periodo.empty:
+                        # Pre-procesamiento seguro de la tabla de tarifas para evitar OutOfBoundsDatetime (9999-12-31)
+                        if not df_tarifas.empty:
+                            df_t = df_tarifas.copy()
+                            df_t["empresa_norm"] = df_t["nombre_empresa"].astype(str).str.replace(" ", "").str.upper()
+                            df_t["cliente_norm"] = df_t["tipo_cliente"].astype(str).str.strip().str.upper()
+                            df_t["placa_norm"] = df_t["placa"].astype(str).str.strip().str.upper()
+                            df_t["tipo_norm"] = df_t["tipo_unidad"].astype(str).str.strip().str.upper()
+
+                            def safe_parse_date(d_val, is_end=False):
+                                if pd.isna(d_val) or not d_val:
+                                    return pd.to_datetime('2099-12-31').date() if is_end else pd.to_datetime('2000-01-01').date()
+                                s = str(d_val).split('T')[0].split(' ')[0]
+                                if s.startswith('9999') or s.startswith('2999'):
+                                    return pd.to_datetime('2099-12-31').date()
+                                try:
+                                    return pd.to_datetime(s).date()
+                                except Exception:
+                                    return pd.to_datetime('2099-12-31').date() if is_end else pd.to_datetime('2000-01-01').date()
+
+                            df_t["f_ini"] = df_t["fecha_inicio"].apply(lambda x: safe_parse_date(x, False))
+                            df_t["f_fin"] = df_t["fecha_fin"].apply(lambda x: safe_parse_date(x, True))
+                        else:
+                            df_t = pd.DataFrame()
+
                         # 2. FUNCIÓN DE ASIGNACIÓN JERÁRQUICA DE TARIFAS
                         def determinar_monto(row):
                             # Regla 1: Costal ($900.00 fijo)
                             if str(row.get("Es_Costal")).upper() == "TRUE":
                                 return 900.0
                             
-                            # Regla 2: Ambulancia (monto variable de la captura)
+                            # Regla 2: Ambulancia (monto variable capturado)
                             if str(row.get("Es_Ambulancia")).upper() == "TRUE":
                                 val_amb = row.get("costo_ambulancia_variable")
                                 try:
@@ -876,17 +900,8 @@ if es_admin:
                             tipo_val = str(row.get("Tipo", "")).strip().upper()
                             fecha_serv = row.get("fecha_raw")
 
-                            if df_tarifas.empty:
+                            if df_t.empty:
                                 return 0.0
-
-                            # Filtrar catálogo de tarifas por Empresa, Cliente y Vigencia
-                            df_t = df_tarifas.copy()
-                            df_t["empresa_norm"] = df_t["nombre_empresa"].astype(str).str.replace(" ", "").str.upper()
-                            df_t["cliente_norm"] = df_t["tipo_cliente"].astype(str).str.strip().str.upper()
-                            df_t["placa_norm"] = df_t["placa"].astype(str).str.strip().str.upper()
-                            df_t["tipo_norm"] = df_t["tipo_unidad"].astype(str).str.strip().str.upper()
-                            df_t["f_ini"] = pd.to_datetime(df_t["fecha_inicio"]).dt.date
-                            df_t["f_fin"] = pd.to_datetime(df_t["fecha_fin"]).dt.date
 
                             filtro_base = (
                                 (df_t["empresa_norm"].str.contains(empresa_target)) &
@@ -904,7 +919,7 @@ if es_admin:
                             if not match_placa.empty:
                                 return float(match_placa.iloc[0]["monto"])
 
-                            # Prioridad 4: Búsqueda general por TIPO DE UNIDAD (placa NULL o vacía)
+                            # Prioridad 4: Búsqueda general por TIPO DE UNIDAD
                             match_tipo = df_candidatas[
                                 (df_candidatas["tipo_norm"] == tipo_val) & 
                                 (df_candidatas["placa"].isna() | (df_candidatas["placa_norm"] == "NONE") | (df_candidatas["placa_norm"] == "NAN") | (df_candidatas["placa_norm"] == ""))
