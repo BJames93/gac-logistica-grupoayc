@@ -935,25 +935,37 @@ if es_admin:
                         False,
                     )
 
-                    # Columna independiente para filtrar fechas.
+                    # ==================================================
+                    # FECHA REAL DEL SERVICIO
+                    # ==================================================
+                    # IMPORTANTE: para el corte y el día de la semana damos prioridad
+                    # a Hora_Arribo. `fecha_filtro` queda solo como respaldo.
+                    # Esto evita que todos los servicios caigan artificialmente en
+                    # el mismo día cuando la vista trae una fecha_filtro repetida.
                     col_fecha_origen = buscar_columna(
                         df_rep,
-                        ["fecha_filtro", "hora_arribo", "hora_llegada_hub", "Hora_Arribo"],
+                        ["Hora_Arribo", "hora_arribo", "hora_llegada_hub", "fecha_filtro"],
                     )
 
                     if col_fecha_origen is None:
                         raise ValueError(
                             "No se encontró una columna de fecha válida en la vista. "
-                            "Se esperaba fecha_filtro, hora_arribo o hora_llegada_hub."
+                            "Se esperaba Hora_Arribo, hora_arribo, hora_llegada_hub o fecha_filtro."
                         )
 
-                    df_rep["fecha_filtro_calculo"] = df_rep[col_fecha_origen]
+                    df_rep["fecha_servicio_calculo"] = df_rep[col_fecha_origen]
 
-                    # Tomamos únicamente YYYY-MM-DD para evitar problemas de zona horaria.
+                    # Extraemos YYYY-MM-DD directamente del valor original.
+                    # Funciona con timestamps como 2026-09-01T09:45:00+00:00
+                    # y evita desplazamientos de fecha por zona horaria.
                     df_rep["fecha_raw"] = pd.to_datetime(
-                        df_rep["fecha_filtro_calculo"].astype(str).str.slice(0, 10),
+                        df_rep["fecha_servicio_calculo"].astype(str).str.slice(0, 10),
                         errors="coerce",
                     ).dt.date
+
+                    # Columna visible de apoyo para validar rápidamente qué fecha
+                    # está utilizando el reporte.
+                    df_rep["Fecha_Servicio"] = df_rep["fecha_raw"]
 
                     # ==================================================
                     # 3. FILTRO DE FECHAS
@@ -976,6 +988,22 @@ if es_admin:
                         # ==================================================
                         # 4. PRE-PROCESAMIENTO DE TARIFAS
                         # ==================================================
+                        import re
+                        import unicodedata
+
+                        def normalizar_clave(valor):
+                            """Normaliza empresa, cliente, tipo y placa para comparaciones seguras."""
+                            if pd.isna(valor):
+                                return ""
+                            texto = str(valor).strip().upper()
+                            if texto in ["NONE", "NAN", "NULL", "NAT"]:
+                                return ""
+                            texto = unicodedata.normalize("NFKD", texto)
+                            texto = "".join(
+                                c for c in texto if not unicodedata.combining(c)
+                            )
+                            return re.sub(r"[^A-Z0-9]", "", texto)
+
                         if not df_tarifas.empty:
                             if df_tarifas.columns.duplicated().any():
                                 df_tarifas = df_tarifas.loc[
@@ -1007,36 +1035,13 @@ if es_admin:
                             if "fecha_fin" not in df_t.columns:
                                 df_t["fecha_fin"] = None
 
-                            # Normalización de claves de búsqueda.
-                            df_t["empresa_norm"] = (
-                                df_t["nombre_empresa"]
-                                .fillna("")
-                                .astype(str)
-                                .str.replace(r"\s+", "", regex=True)
-                                .str.upper()
-                            )
-                            df_t["cliente_norm"] = (
-                                df_t["tipo_cliente"]
-                                .fillna("")
-                                .astype(str)
-                                .str.strip()
-                                .str.upper()
-                            )
-                            df_t["tipo_norm"] = (
-                                df_t["tipo_unidad"]
-                                .fillna("")
-                                .astype(str)
-                                .str.strip()
-                                .str.upper()
-                            )
-                            df_t["placa_norm"] = (
-                                df_t["placa"]
-                                .fillna("")
-                                .astype(str)
-                                .str.strip()
-                                .str.upper()
-                                .replace({"NONE": "", "NAN": "", "NULL": ""})
-                            )
+                            # Normalización ROBUSTA de claves de búsqueda.
+                            # Quitamos espacios, guiones, acentos y otros signos para
+                            # que variantes de escritura se comparen como la misma clave.
+                            df_t["empresa_norm"] = df_t["nombre_empresa"].apply(normalizar_clave)
+                            df_t["cliente_norm"] = df_t["tipo_cliente"].apply(normalizar_clave)
+                            df_t["tipo_norm"] = df_t["tipo_unidad"].apply(normalizar_clave)
+                            df_t["placa_norm"] = df_t["placa"].apply(normalizar_clave)
                             df_t["monto_num"] = pd.to_numeric(
                                 df_t["monto"], errors="coerce"
                             ).fillna(0.0)
@@ -1120,25 +1125,20 @@ if es_admin:
                                 return 0.0
 
                             # 2) Datos normalizados del viaje.
-                            empresa_val = "GRUPOAYC" if es_resico else "BOULDERBRWN"
-                            cliente_val = str(row.get("Cliente", "")).strip().upper()
-                            placa_val = str(row.get("Placas", "")).strip().upper()
-                            tipo_val = str(row.get("Tipo", "")).strip().upper()
+                            empresa_token = "AYC" if es_resico else "BOULDER"
+                            cliente_val = normalizar_clave(row.get("Cliente", ""))
+                            placa_val = normalizar_clave(row.get("Placas", ""))
+                            tipo_val = normalizar_clave(row.get("Tipo", ""))
                             fecha_raw_val = row.get("fecha_raw")
 
-                            if placa_val in ["NONE", "NAN", "NULL"]:
-                                placa_val = ""
-
-                            if (
-                                df_t.empty
-                                or cliente_val in ["", "NONE", "NAN", "NULL"]
-                                or pd.isna(fecha_raw_val)
-                            ):
+                            if df_t.empty or not cliente_val or pd.isna(fecha_raw_val):
                                 return 0.0
 
                             # 3) Filtrar por empresa + cliente + vigencia.
+                            # Para empresa usamos contains porque es más tolerante a
+                            # variantes como GRUPOAYC / GRUPOAYCLOGISTICA.
                             filtro_base = (
-                                (df_t["empresa_norm"] == empresa_val)
+                                (df_t["empresa_norm"].str.contains(empresa_token, na=False))
                                 & (df_t["cliente_norm"] == cliente_val)
                                 & (df_t["f_ini"] <= fecha_raw_val)
                                 & (df_t["f_fin"] >= fecha_raw_val)
@@ -1205,10 +1205,37 @@ if es_admin:
                             - df_periodo["Retencion_ISR"]
                         )
 
+                        # Diagnóstico no invasivo: si alguna ruta quedó en $0,
+                        # mostramos las combinaciones sin tarifa para detectar
+                        # rápidamente un dato faltante en Supabase.
+                        filas_sin_tarifa = df_periodo[
+                            (df_periodo["Monto_por_Unidad"] == 0)
+                            & (~df_periodo["Es_Ambulancia"].apply(es_verdadero))
+                            & (~df_periodo["Es_Costal"].apply(es_verdadero))
+                        ].copy()
+
+                        if not filas_sin_tarifa.empty:
+                            st.warning(
+                                f"⚠️ {len(filas_sin_tarifa)} servicio(s) quedaron sin tarifa. "
+                                "Revisa Empresa, Cliente, Tipo, Placa o vigencia en Supabase."
+                            )
+                            columnas_diag = [
+                                c for c in [
+                                    "Fecha_Servicio", "Cliente", "Tipo", "Placas"
+                                ] if c in filas_sin_tarifa.columns
+                            ]
+                            if columnas_diag:
+                                st.dataframe(
+                                    filas_sin_tarifa[columnas_diag]
+                                    .drop_duplicates()
+                                    .reset_index(drop=True),
+                                    use_container_width=True,
+                                )
+
                         # Eliminamos solamente columnas técnicas creadas por el cálculo.
                         # Se conserva Hora_Arribo / fecha_filtro originales para visualización.
                         df_periodo = df_periodo.drop(
-                            columns=["fecha_filtro_calculo", "fecha_raw"],
+                            columns=["fecha_servicio_calculo", "fecha_raw"],
                             errors="ignore",
                         )
 
