@@ -20,8 +20,8 @@ BUCKET_NAME = "documentos_operacion"
 # ==============================================================
 # Modifica únicamente esta lista para agregar o quitar estaciones
 ESTACIONES = [
-    "SVC",
-    # "SCN1",
+    "SCN1",
+    "SMD1",
     # "SMD1"
 ]
 
