@@ -21,10 +21,8 @@ BUCKET_NAME = "documentos_operacion"
 # Modifica únicamente esta lista para agregar o quitar estaciones
 ESTACIONES = [
     "SVC",
-    # "SMX5",
-    # "SMT1",
-    # "SMT2",
-    # "SMT3"
+    # "SCN1",
+    # "SMD1"
 ]
 
 # Función para limpiar caracteres especiales (acentos, ñ, espacios)
