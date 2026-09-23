@@ -7,12 +7,25 @@ import io
 import zipfile
 import requests
 from fpdf import FPDF
+
 # --- 1. CONFIGURACIÓN E INICIALIZACIÓN DE CREDENCIALES ---
 SUPABASE_URL = "https://wfdhuzlohwcemfjeudrl.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndmZGh1emxvaHdjZW1mamV1ZHJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNDM0NDEsImV4cCI6MjA5NDgxOTQ0MX0.ecnOCJnMDxHpYHuZmAvR5Fy95utOsFZ1Xjg3Xzyj8UM"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndmZGh1emxvaHdjZW1famV1ZHJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNDM0NDEsImV4cCI6MjA5NDgxOTQ0MX0.ecnOCJnMDxHpYHuZmAvR5Fy95utOsFZ1Xjg3Xzyj8UM"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 BUCKET_NAME = "documentos_operacion"
+
+# ==============================================================
+# CONFIGURACIÓN CENTRALIZADA DE ESTACIONES (MULTIESTACIÓN)
+# ==============================================================
+# Modifica únicamente esta lista para agregar o quitar estaciones
+ESTACIONES = [
+    "SVC",
+    # "SMX5",
+    # "SMT1",
+    # "SMT2",
+    # "SMT3"
+]
 
 # Función para limpiar caracteres especiales (acentos, ñ, espacios)
 def limpiar_texto(texto):
@@ -46,8 +59,21 @@ def procesar_archivo(archivo, carpeta, identificador):
     return None
 
 # --- INTERFAZ ---
-st.set_page_config(page_title="Grupo AyC",page_icon=":truck:",layout="wide")
+st.set_page_config(page_title="Grupo AyC", page_icon=":truck:", layout="wide")
 st.title("📊 Sistema Centralizado Grupo AyC")
+
+# ==============================================================
+# SELECTOR CENTRALIZADO DE ESTACIÓN (SIDEBAR)
+# ==============================================================
+st.sidebar.image("https://via.placeholder.com/150?text=Grupo+AyC", use_column_width=True) if False else None
+st.sidebar.markdown("### 🏬 Estación Operativa")
+estacion_seleccionada = st.sidebar.selectbox(
+    "Seleccione Estación:",
+    options=ESTACIONES,
+    key="estacion_global_selector"
+)
+st.sidebar.info(f"Estación activa: **{estacion_seleccionada}**")
+
 # ==========================================
 # CREACIÓN DINÁMICA DE PESTAÑAS (TABS SECRETO)
 # ==========================================
@@ -73,7 +99,7 @@ else:
 # ==========================================
 with tab1:
     with st.form("form_conductor", clear_on_submit=True):
-        
+        st.caption(f"📍 Registrando para Estación: **{estacion_seleccionada}**")
         st.subheader("📝 Datos Generales")
         col1, col2 = st.columns(2)
         with col1:
@@ -141,6 +167,7 @@ with tab1:
                     "celular": celular,
                     "nombre_banco": banco,            
                     "clabe_interbancaria": clabe,    
+                    "estacion_codigo": estacion_seleccionada, # ============================== CAMPO MULTIESTACIÓN
                     "url_fotografia": procesar_archivo(f_foto, "conductores/fotos", rfc),
                     "url_acta_nacimiento": procesar_archivo(f_acta, "conductores/actas", rfc),
                     "url_curp": procesar_archivo(f_curp, "conductores/curps", rfc),
@@ -156,14 +183,16 @@ with tab1:
                 }
                 try:
                     supabase.table("alta_conductor").insert(datos).execute()
-                    st.success("Conductor registrado exitosamente")
+                    st.success(f"Conductor registrado exitosamente para la estación {estacion_seleccionada}")
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
+
 # ==========================================
 # PESTAÑA 2: UNIDADES
 # ==========================================
 with tab2:
     with st.form("form_unidades", clear_on_submit=True):
+        st.caption(f"📍 Registrando para Estación: **{estacion_seleccionada}**")
         p = st.text_input("Placas")
         m = st.text_input("Marca")
         sm = st.text_input("Submarca")
@@ -188,6 +217,7 @@ with tab2:
                     "marca": m, 
                     "submarca": sm,
                     "tipo_unidad": tipo,
+                    "estacion_codigo": estacion_seleccionada, # ============================== CAMPO MULTIESTACIÓN
                     "url_tarjeta_circulacion": procesar_archivo(f_circ, "unidades/tarjetas", p),
                     "url_poliza_seguro": procesar_archivo(f_seg, "unidades/polizas", p),
                     "url_vin": procesar_archivo(f_vin, "unidades/vin", p),
@@ -195,26 +225,26 @@ with tab2:
                 }
                 try:
                     supabase.table("unidades").insert(datos_u).execute()
-                    st.success("Unidad registrada exitosamente")
+                    st.success(f"Unidad registrada exitosamente para la estación {estacion_seleccionada}")
                 except Exception as e:
                     st.error(f"Error al registrar la unidad: {e}")
-
 
 # ==========================================
 # PESTAÑA 3: REGISTRO DE OPERACIÓN
 # ==========================================
 with tab3:
     st.header("Captura Dinámica de Despacho Operativo")
-    st.write("Módulo relacional. Permite enlazar los conductores y unidades activos en sistema.")
+    st.write(f"Módulo relacional. Filtrando conductores y unidades para la estación **{estacion_seleccionada}**.")
     
     # 1. Definimos variables vacías por defecto para prevenir NameError
     dict_conductores = {}
     dict_unidades = {}
     
-    # 2. Intentamos cargar datos desde la base de datos
+    # 2. Intentamos cargar datos desde la base de datos FILTRANDO POR ESTACIÓN
     try:
-        conductores_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
-        unidades_db = supabase.table("unidades").select("id_unidad, placas").execute().data
+        # ============================== CONSULTAS FILTRADAS POR ESTACIÓN ==============================
+        conductores_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").eq("estacion_codigo", estacion_seleccionada).execute().data
+        unidades_db = supabase.table("unidades").select("id_unidad, placas").eq("estacion_codigo", estacion_seleccionada).execute().data
         
         # Mapeo seguro
         dict_conductores = {c["nombre_driver"]: c["id_conductor"] for c in conductores_db}
@@ -224,7 +254,7 @@ with tab3:
 
     # 3. Verificamos que existan datos antes de mostrar el formulario
     if not dict_conductores or not dict_unidades:
-        st.warning("⚠️ Atención: Debes tener conductores y unidades registrados para operar.")
+        st.warning(f"⚠️ Atención: Debes tener conductores y unidades registrados para la estación {estacion_seleccionada} para operar.")
     else:
         # =======================================================
         # MÓDULO 1: REGISTRO DE OPERACIÓN (DESPACHO)
@@ -284,17 +314,18 @@ with tab3:
                         "paradas": int(paradas),
                         "ambulancia": es_ambulancia,
                         "costal": es_costal,
-                        "costo_ambulancia_variable": float(monto_ambulancia)
+                        "costo_ambulancia_variable": float(monto_ambulancia),
+                        "estacion_codigo": estacion_seleccionada # ============================== CAMPO MULTIESTACIÓN
                     }
                     
                     try:
                         supabase.table("registro_operacion").insert(datos_operacion).execute()
-                        st.success(f"¡Viaje despachado! (Ambulancia: {'Sí' if es_ambulancia else 'No'} | Costo: ${monto_ambulancia:,.2f})")
+                        st.success(f"¡Viaje despachado en estación {estacion_seleccionada}! (Ambulancia: {'Sí' if es_ambulancia else 'No'} | Costo: ${monto_ambulancia:,.2f})")
                     except Exception as e:
                         st.error(f"Error al registrar la operación en base de datos: {e}")
 
         # =======================================================
-        # MÓDULO 2: REGISTRO DE DEVOLUCIONES (Ya NO está duplicado)
+        # MÓDULO 2: REGISTRO DE DEVOLUCIONES
         # =======================================================
         st.write("---")
         st.subheader("📦 Registro de Devoluciones")
@@ -331,12 +362,13 @@ with tab3:
                         st.success(f"✅ ¡Devolución de {dev_paquetes} paquete(s) de {dev_cliente} registrada correctamente!")
                     except Exception as e:
                         st.error(f"Error al registrar la devolución en la base de datos: {e}")
+
 # ==========================================
 # NUEVA PESTAÑA 4: CONSULTA DE EXPEDIENTES
 # ==========================================
-# (Asegúrate de agregar "🔍 Consulta" a tu lista de st.tabs arriba)
 with tab4:
     st.header("🔍 Consulta Integral de Expedientes")
+    st.caption(f"📍 Consultando registros de Estación: **{estacion_seleccionada}**")
     tipo_consulta = st.radio("¿Qué desea consultar?", ["Conductores", "Unidades"], horizontal=True)
     
     # Función de apoyo para crear el archivo ZIP en memoria
@@ -347,18 +379,18 @@ with tab4:
                 try:
                     respuesta = requests.get(url)
                     if respuesta.status_code == 200:
-                        # Extraemos la extensión del archivo (pdf, jpg, etc.)
                         ext = url.split('.')[-1]
                         if len(ext) > 4 or not ext.isalnum():
-                            ext = "pdf" # Extensión por defecto si no es clara
+                            ext = "pdf"
                         zip_file.writestr(f"{nombre}.{ext}", respuesta.content)
                 except Exception:
-                    pass # Si un archivo falla al descargar, simplemente lo omite
+                    pass
         return zip_buffer.getvalue()
 
     if tipo_consulta == "Conductores":
         try:
-            res = supabase.table("alta_conductor").select("*").execute()
+            # ============================== FILTRADO POR ESTACIÓN ==============================
+            res = supabase.table("alta_conductor").select("*").eq("estacion_codigo", estacion_seleccionada).execute()
             df = pd.DataFrame(res.data)
             
             if not df.empty:
@@ -375,9 +407,9 @@ with tab4:
                             st.write(f"**RFC:** {reg.get('rfc', 'N/A')}")
                             st.write(f"**Correo:** {reg.get('correo', 'N/A')}")
                             st.write(f"**Celular:** {reg.get('celular', 'N/A')}")
-                            # --- NUEVOS CAMPOS BANCARIOS ---
                             st.write(f"**Banco:** {reg.get('nombre_banco', 'N/A') or 'N/A'}")
                             st.write(f"**CLABE:** {reg.get('clabe_interbancaria', 'N/A') or 'N/A'}")
+                            st.write(f"**Estación:** {reg.get('estacion_codigo', 'N/A')}")
                             
                             foto = reg.get('url_fotografia')
                             if foto and isinstance(foto, str):
@@ -393,18 +425,16 @@ with tab4:
                                 "Carta de Referencia": "url_carta_referencia"
                             }
                             
-                            # Diccionario para almacenar solo los enlaces válidos
                             documentos_validos = {}
                             
                             for nombre, key in docs.items():
                                 url = reg.get(key)
                                 if url and isinstance(url, str) and url.startswith("http"):
                                     st.link_button(f"📄 Ver {nombre}", url)
-                                    documentos_validos[nombre] = url # Guardamos para el ZIP
+                                    documentos_validos[nombre] = url
                                 else:
                                     st.caption(f"❌ {nombre}: No cargado")
                             
-                            # --- BOTÓN DE DESCARGA MASIVA ---
                             if documentos_validos:
                                 st.write("---")
                                 st.download_button(
@@ -413,12 +443,15 @@ with tab4:
                                     file_name=f"Expediente_{sel.replace(' ', '_')}.zip",
                                     mime="application/zip"
                                 )
+            else:
+                st.info(f"No hay conductores registrados para la estación {estacion_seleccionada}.")
         except Exception as e:
             st.error(f"Error cargando conductores: {e}")
 
     else: # --- LÓGICA DE UNIDADES ---
         try:
-            res = supabase.table("unidades").select("*").execute()
+            # ============================== FILTRADO POR ESTACIÓN ==============================
+            res = supabase.table("unidades").select("*").eq("estacion_codigo", estacion_seleccionada).execute()
             df = pd.DataFrame(res.data)
             
             if not df.empty:
@@ -431,7 +464,7 @@ with tab4:
                         reg = fila.iloc[0].to_dict()
                         st.subheader(f"Unidad Placas: {sel}")
                         st.write(f"**Marca:** {reg.get('marca', 'N/A')} | **Submarca:** {reg.get('submarca', 'N/A')} | **Modelo:** {reg.get('modelo', 'N/A')}")
-                        st.write(f"**Tipo de Unidad:** {reg.get('tipo_unidad', 'N/A')}")
+                        st.write(f"**Tipo de Unidad:** {reg.get('tipo_unidad', 'N/A')} | **Estación:** {reg.get('estacion_codigo', 'N/A')}")
                         
                         st.write("### Documentación de Unidad")
                         docs_u = {
@@ -447,11 +480,10 @@ with tab4:
                             url = reg.get(key)
                             if url and isinstance(url, str) and url.startswith("http"):
                                 st.link_button(f"📄 Ver {nombre}", url)
-                                documentos_u_validos[nombre] = url # Guardamos para el ZIP
+                                documentos_u_validos[nombre] = url
                             else:
                                 st.caption(f"❌ {nombre}: No cargado")
                                 
-                        # --- BOTÓN DE DESCARGA MASIVA ---
                         if documentos_u_validos:
                             st.write("---")
                             st.download_button(
@@ -460,6 +492,8 @@ with tab4:
                                 file_name=f"Unidad_{sel.replace(' ', '_')}.zip",
                                 mime="application/zip"
                             )
+            else:
+                st.info(f"No hay unidades registradas para la estación {estacion_seleccionada}.")
         except Exception as e:
             st.error(f"Error cargando unidades: {e}")
 
@@ -473,18 +507,17 @@ with tab5:
     rfc_busqueda = st.text_input("Ingresa el RFC del conductor para actualizar:")
     
     if rfc_busqueda:
+        # ============================== BÚSQUEDA Y VALIDACIÓN DE ESTACIÓN ==============================
         res = supabase.table("alta_conductor").select("*").eq("rfc", rfc_busqueda.upper()).execute()
         
         if res.data:
             reg = res.data[0]
-            st.write(f"Conductor encontrado: **{reg['nombre_driver']}**")
+            st.write(f"Conductor encontrado: **{reg['nombre_driver']}** (Estación: **{reg.get('estacion_codigo', 'N/A')}**)")
             st.write(f"Celular actual: **{reg.get('celular', 'No registrado')}**")
-            # --- MOSTRAMOS LOS DATOS BANCARIOS ACTUALES ---
             banco_actual = reg.get('nombre_banco') or 'No registrado'
             clabe_actual = reg.get('clabe_interbancaria') or 'No registrado'
             st.write(f"Banco actual: **{banco_actual}** | CLABE actual: **{clabe_actual}**")
             
-            # --- AYUDA VISUAL PARA EL USUARIO ---
             st.write("---")
             st.write("Estado de documentos actuales:")
             docs_map = {
@@ -501,24 +534,19 @@ with tab5:
                 cols[i % 3].write(f"{status} {nombre}")
             st.write("---")
             
-            # --- SELECTOR EXTENDIDO CON DATOS BANCARIOS ---
             opcion = st.selectbox("¿Qué deseas actualizar?", [""] + list(docs_map.keys()) + ["Actualizar Número de Celular", "Actualizar Datos Bancarios"])
             
             if opcion == "Actualizar Número de Celular":
-                # Mostramos el valor actual en la caja de texto para que sea más fácil editar
                 nuevo_celular = st.text_input("Nuevo número de celular:", value=reg.get('celular') or "")
                 if st.button("Guardar nuevo celular"):
                     supabase.table("alta_conductor").update({"celular": nuevo_celular}).eq("rfc", rfc_busqueda.upper()).execute()
                     st.success("¡Celular actualizado correctamente! Recarga la página para ver el cambio.")
             
-            # --- NUEVA LÓGICA PARA ACTUALIZAR BANCO Y CLABE ---
             elif opcion == "Actualizar Datos Bancarios":
                 nuevo_banco = st.text_input("Nuevo Nombre del Banco:", value=reg.get('nombre_banco') or "")
-                # Bloqueo físico de 18 caracteres
                 nueva_clabe = st.text_input("Nueva CLABE Interbancaria:", max_chars=18, value=reg.get('clabe_interbancaria') or "")
                 
                 if st.button("Guardar datos bancarios"):
-                    # Validaciones de la CLABE (igual que en el alta)
                     if nueva_clabe and len(nueva_clabe) < 18:
                         st.error(f"La CLABE está incompleta. Ingresaste {len(nueva_clabe)} dígitos de los 18 requeridos.")
                     elif nueva_clabe and not nueva_clabe.isdigit():
@@ -530,7 +558,6 @@ with tab5:
                         }).eq("rfc", rfc_busqueda.upper()).execute()
                         st.success("¡Datos bancarios actualizados correctamente! Recarga la página para ver el cambio.")
             
-            # --- LÓGICA PARA ARCHIVOS ---
             elif opcion in docs_map:
                 archivo_nuevo = st.file_uploader(f"Cargar nuevo archivo de {opcion}")
                 if st.button("Guardar actualización"):
@@ -548,16 +575,12 @@ with tab5:
         else:
             st.error("No se encontró ningún conductor con ese RFC.")
 
-
-# ===============================================
-# NUEVA PESTAÑA 6: VERIFICACION DE CAPTURA
-# ===============================================
 # ===============================================
 # NUEVA PESTAÑA 6: VERIFICACION DE CAPTURA
 # ===============================================
 with tab6:
     st.header("📊 Verificación de Captura")
-    st.write("Consulta, verifica y edita los registros operativos y devoluciones del sistema.")
+    st.write(f"Consulta, verifica y edita los registros operativos y devoluciones correspondientes a la estación **{estacion_seleccionada}**.")
 
     # --- SELECCIÓN DE MÓDULO ---
     modulo_consulta = st.radio("¿Qué registros deseas consultar?", ["Despachos Operativos", "Devoluciones"], horizontal=True)
@@ -571,9 +594,10 @@ with tab6:
 
     if st.button("Buscar Capturas"):
         try:
-            # Descargamos los catálogos base
-            cond_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").execute().data
-            unid_db = supabase.table("unidades").select("id_unidad, placas, tipo_unidad").execute().data
+            # Descargamos los catálogos base FILTRADOS POR ESTACIÓN
+            # ============================== CONSULTAS FILTRADAS POR ESTACIÓN ==============================
+            cond_db = supabase.table("alta_conductor").select("id_conductor, nombre_driver").eq("estacion_codigo", estacion_seleccionada).execute().data
+            unid_db = supabase.table("unidades").select("id_unidad, placas, tipo_unidad").eq("estacion_codigo", estacion_seleccionada).execute().data
 
             map_cond = {c["id_conductor"]: c["nombre_driver"] for c in cond_db}
             map_unid = {u["id_unidad"]: u["placas"] for u in unid_db}
@@ -585,7 +609,8 @@ with tab6:
             st.session_state["tab6_modulo_activo"] = modulo_consulta
 
             if modulo_consulta == "Despachos Operativos":
-                res_op = supabase.table("registro_operacion").select("*").execute()
+                # ============================== FILTRADO DE OPERACIONES POR ESTACIÓN ==============================
+                res_op = supabase.table("registro_operacion").select("*").eq("estacion_codigo", estacion_seleccionada).execute()
                 df_op = pd.DataFrame(res_op.data)
 
                 if not df_op.empty:
@@ -615,10 +640,10 @@ with tab6:
                         df_filtrado["hora_llegada_hub_str"] = df_filtrado["hora_llegada_hub_raw"].dt.strftime('%Y-%m-%d %H:%M')
                         st.session_state["tab6_df"] = df_filtrado
                     else:
-                        st.warning(f"No se encontraron despachos operativos entre {fecha_inicio} y {fecha_fin}.")
+                        st.warning(f"No se encontraron despachos operativos para la estación {estacion_seleccionada} entre {fecha_inicio} y {fecha_fin}.")
                         st.session_state.pop("tab6_df", None)
                 else:
-                    st.info("Aún no hay registros de operaciones.")
+                    st.info(f"Aún no hay registros de operaciones en la estación {estacion_seleccionada}.")
                     st.session_state.pop("tab6_df", None)
 
             elif modulo_consulta == "Devoluciones":
@@ -628,16 +653,24 @@ with tab6:
                 if not df_dev.empty:
                     df_dev["Conductor"] = df_dev["conductor_id"].map(map_cond)
                     df_dev["Placas"] = df_dev["unidad_id"].map(map_unid)
-                    df_dev["fecha_dev_raw"] = pd.to_datetime(df_dev["fecha_devolucion"]).dt.date
+                    
+                    # Filtramos únicamente devoluciones cuyos conductores/unidades pertenezcan a la estación activa
+                    df_dev = df_dev[df_dev["Conductor"].notna() | df_dev["Placas"].notna()]
+                    
+                    if not df_dev.empty:
+                        df_dev["fecha_dev_raw"] = pd.to_datetime(df_dev["fecha_devolucion"]).dt.date
 
-                    mascara = (df_dev["fecha_dev_raw"] >= fecha_inicio) & (df_dev["fecha_dev_raw"] <= fecha_fin)
-                    df_filtrado = df_dev.loc[mascara].copy()
+                        mascara = (df_dev["fecha_dev_raw"] >= fecha_inicio) & (df_dev["fecha_dev_raw"] <= fecha_fin)
+                        df_filtrado = df_dev.loc[mascara].copy()
 
-                    if not df_filtrado.empty:
-                        df_filtrado["fecha_dev_str"] = df_filtrado["fecha_dev_raw"].astype(str)
-                        st.session_state["tab6_df"] = df_filtrado
+                        if not df_filtrado.empty:
+                            df_filtrado["fecha_dev_str"] = df_filtrado["fecha_dev_raw"].astype(str)
+                            st.session_state["tab6_df"] = df_filtrado
+                        else:
+                            st.warning(f"No se encontraron devoluciones para la estación {estacion_seleccionada} entre {fecha_inicio} y {fecha_fin}.")
+                            st.session_state.pop("tab6_df", None)
                     else:
-                        st.warning(f"No se encontraron devoluciones entre {fecha_inicio} y {fecha_fin}.")
+                        st.info(f"No hay devoluciones asociadas a la estación {estacion_seleccionada}.")
                         st.session_state.pop("tab6_df", None)
                 else:
                     st.info("Aún no hay devoluciones registradas.")
@@ -674,7 +707,6 @@ with tab6:
                 "paquetes_devueltos": "Devols.", "paradas": "Paradas", "costo_ambulancia_variable": "Costo Amb."
             })
 
-            # Performance y Llenado seguro de Costo (Por si hay NaN en BD)
             if "Costo Amb." in df_mostrar.columns:
                 df_mostrar["Costo Amb."] = df_mostrar["Costo Amb."].fillna(0.0)
                 
@@ -729,7 +761,6 @@ with tab6:
 
                 fe3, fe4 = st.columns(2)
                 
-                # --- SOLUCIÓN AL TYPE_ERROR DE PANDAS/NULL ---
                 val_costo = fila.get("costo_ambulancia_variable", 0.0)
                 if pd.isna(val_costo) or val_costo is None or val_costo == "": 
                     val_costo = 0.0
@@ -738,13 +769,10 @@ with tab6:
                 nuevos_paquetes = fe4.number_input("Paquetes Cargados", min_value=0, value=int(fila["paquetes_cargados"]))
                 nuevas_paradas = fe4.number_input("Paradas", min_value=0, value=int(fila["paradas"]))
 
-                # --- SOLUCIÓN AL MISSING SUBMIT BUTTON ---
-                # 1. Se declaran los botones DENTRO del form, a nivel raíz del form
                 col_guardar, col_borrar = st.columns([3, 1])
                 btn_guardar_op = col_guardar.form_submit_button("💾 Guardar Cambios Operación")
                 btn_borrar_op = col_borrar.form_submit_button("🗑️ Eliminar")
 
-                # 2. Se evalúa la acción de los botones después de declararlos
                 if btn_guardar_op:
                     supabase.table("registro_operacion").update({
                         "hora_llegada_hub": datetime.combine(nueva_fecha, nueva_hora).isoformat(),
@@ -789,7 +817,6 @@ with tab6:
                 nuevos_paquetes_d = fd2.number_input("Paquetes Devueltos", min_value=1, value=int(fila_dev["paquetes_devueltos"]))
                 nuevo_costal_d = fd2.checkbox("¿Ruta de Costales?", value=str(fila_dev.get("costal", False)).upper() in ["SÍ", "SI", "TRUE", "1"])
                 
-                # --- SOLUCIÓN AL MISSING SUBMIT BUTTON PARA DEVOLUCIONES ---
                 col_g, col_b = st.columns([3, 1])
                 btn_guardar_dev = col_g.form_submit_button("💾 Guardar Cambios")
                 btn_borrar_dev = col_b.form_submit_button("🗑️ Eliminar")
@@ -806,21 +833,14 @@ with tab6:
                     supabase.table("devoluciones").delete().eq("id", id_sel_dev).execute()
                     st.warning("🗑️ Eliminado."); st.session_state.pop("tab6_df", None); st.rerun()
 
-
 # ===============================================
 # NUEVA PESTAÑA: REPORTE DE CONCILIACIÓN (SECRETA)
 # ===============================================
-
-# liga para admin
-# https://gac-logistica-grupoayc-i9ukfmgrbphz7gqqvvojzr.streamlit.app/?admin=AyC2026
 if es_admin:
     with tab_reporte:
         st.header("📊 Reporte de Conciliación y Facturación")
         st.info("Esta pestaña es privada mediante URL. Módulo de cálculo fiscal y exportación.")
 
-        # ==========================================================
-        # SELECTOR DE EMPRESA Y RÉGIMEN
-        # ==========================================================
         empresa_seleccionada = st.radio(
             "Seleccione la Empresa (Régimen Fiscal):",
             [
@@ -833,9 +853,6 @@ if es_admin:
         es_resico = "RESICO" in empresa_seleccionada
         nombre_empresa_corte = "Grupo AyC" if es_resico else "Boulder Brwn"
 
-        # ==========================================================
-        # PARÁMETROS DEL REPORTE
-        # ==========================================================
         c1, c2, c3 = st.columns(3)
         with c1:
             fecha_ini = st.date_input("Fecha Inicio de Corte")
@@ -851,9 +868,6 @@ if es_admin:
 
         if st.button("Generar Conciliación"):
             try:
-                # ==================================================
-                # 1. CONSULTA DE DATOS
-                # ==================================================
                 tabla_consultar = "vista_reporte_ayc" if es_resico else "vista_reporte_bb"
 
                 res_reporte = supabase.table(tabla_consultar).select("*").execute()
@@ -866,20 +880,10 @@ if es_admin:
                     st.warning("No se encontraron viajes capturados.")
 
                 else:
-                    # ==================================================
-                    # 2. NORMALIZACIÓN SEGURA DE COLUMNAS DEL REPORTE
-                    # ==================================================
-                    # Evita el error:
-                    # "cannot assemble with duplicate keys"
-                    # No renombramos varias columnas al mismo nombre.
-                    # Creamos alias controlados conservando las originales.
-
-                    # Protección adicional ante columnas duplicadas reales.
                     if df_rep.columns.duplicated().any():
                         df_rep = df_rep.loc[:, ~df_rep.columns.duplicated()].copy()
 
                     def buscar_columna(df, opciones):
-                        """Devuelve la primera columna existente, ignorando mayúsculas/minúsculas."""
                         mapa = {str(col).strip().lower(): col for col in df.columns}
                         for opcion in opciones:
                             encontrada = mapa.get(str(opcion).strip().lower())
@@ -888,7 +892,6 @@ if es_admin:
                         return None
 
                     def crear_alias(df, destino, opciones, valor_default=None):
-                        """Crea una columna estándar sin renombrar ni duplicar columnas existentes."""
                         if destino in df.columns:
                             return
 
@@ -898,7 +901,6 @@ if es_admin:
                         else:
                             df[destino] = valor_default
 
-                    # Columnas estándar utilizadas por el módulo.
                     crear_alias(df_rep, "Cliente", ["Cliente", "cliente", "tipo_cliente"], "")
                     crear_alias(df_rep, "Tipo", ["Tipo", "tipo", "tipo_unidad", "tipo_vehiculo"], "")
                     crear_alias(df_rep, "Placas", ["Placas", "placas", "placa"], "")
@@ -915,7 +917,6 @@ if es_admin:
                         False,
                     )
 
-                    # Alias para conservar compatibilidad con el PDF.
                     crear_alias(
                         df_rep,
                         "Hora_Arribo",
@@ -935,13 +936,6 @@ if es_admin:
                         False,
                     )
 
-                    # ==================================================
-                    # FECHA REAL DEL SERVICIO
-                    # ==================================================
-                    # IMPORTANTE: para el corte y el día de la semana damos prioridad
-                    # a Hora_Arribo. `fecha_filtro` queda solo como respaldo.
-                    # Esto evita que todos los servicios caigan artificialmente en
-                    # el mismo día cuando la vista trae una fecha_filtro repetida.
                     col_fecha_origen = buscar_columna(
                         df_rep,
                         ["Hora_Arribo", "hora_arribo", "hora_llegada_hub", "fecha_filtro"],
@@ -955,21 +949,13 @@ if es_admin:
 
                     df_rep["fecha_servicio_calculo"] = df_rep[col_fecha_origen]
 
-                    # Extraemos YYYY-MM-DD directamente del valor original.
-                    # Funciona con timestamps como 2026-09-01T09:45:00+00:00
-                    # y evita desplazamientos de fecha por zona horaria.
                     df_rep["fecha_raw"] = pd.to_datetime(
                         df_rep["fecha_servicio_calculo"].astype(str).str.slice(0, 10),
                         errors="coerce",
                     ).dt.date
 
-                    # Columna visible de apoyo para validar rápidamente qué fecha
-                    # está utilizando el reporte.
                     df_rep["Fecha_Servicio"] = df_rep["fecha_raw"]
 
-                    # ==================================================
-                    # 3. FILTRO DE FECHAS
-                    # ==================================================
                     mascara_fechas = (
                         (df_rep["fecha_raw"].notna())
                         & (df_rep["fecha_raw"] >= fecha_ini)
@@ -985,14 +971,10 @@ if es_admin:
                             df_periodo["fecha_raw"]
                         ).dt.strftime("%A")
 
-                        # ==================================================
-                        # 4. PRE-PROCESAMIENTO DE TARIFAS
-                        # ==================================================
                         import re
                         import unicodedata
 
                         def normalizar_clave(valor):
-                            """Normaliza empresa, cliente, tipo y placa para comparaciones seguras."""
                             if pd.isna(valor):
                                 return ""
                             texto = str(valor).strip().upper()
@@ -1027,7 +1009,6 @@ if es_admin:
                                     + ", ".join(faltantes)
                                 )
 
-                            # Columnas opcionales.
                             if "placa" not in df_t.columns:
                                 df_t["placa"] = None
                             if "fecha_inicio" not in df_t.columns:
@@ -1035,9 +1016,6 @@ if es_admin:
                             if "fecha_fin" not in df_t.columns:
                                 df_t["fecha_fin"] = None
 
-                            # Normalización ROBUSTA de claves de búsqueda.
-                            # Quitamos espacios, guiones, acentos y otros signos para
-                            # que variantes de escritura se comparen como la misma clave.
                             df_t["empresa_norm"] = df_t["nombre_empresa"].apply(normalizar_clave)
                             df_t["cliente_norm"] = df_t["tipo_cliente"].apply(normalizar_clave)
                             df_t["tipo_norm"] = df_t["tipo_unidad"].apply(normalizar_clave)
@@ -1056,7 +1034,6 @@ if es_admin:
 
                                 s = str(d_val).split("T")[0].split(" ")[0]
 
-                                # Supabase puede guardar 9999-12-31 como vigencia abierta.
                                 if s.startswith("9999") or s.startswith("2999"):
                                     return pd.to_datetime("2099-12-31").date()
 
@@ -1079,9 +1056,6 @@ if es_admin:
                         else:
                             df_t = pd.DataFrame()
 
-                        # ==================================================
-                        # 5. LÓGICA DE ASIGNACIÓN DE TARIFAS
-                        # ==================================================
                         def es_verdadero(valor):
                             return str(valor).strip().lower() in [
                                 "true",
@@ -1093,7 +1067,6 @@ if es_admin:
                             ]
 
                         def tomar_tarifa_mas_reciente(df_matches):
-                            """Si hay varias tarifas válidas, toma la de inicio más reciente."""
                             if df_matches.empty:
                                 return None
 
@@ -1111,7 +1084,6 @@ if es_admin:
                             return float(ordenado.iloc[0]["monto_num"])
 
                         def determinar_monto(row):
-                            # 1) Reglas especiales primero.
                             if es_verdadero(row.get("Es_Costal")):
                                 return 900.0
 
@@ -1124,7 +1096,6 @@ if es_admin:
                                     pass
                                 return 0.0
 
-                            # 2) Datos normalizados del viaje.
                             empresa_token = "AYC" if es_resico else "BOULDER"
                             cliente_val = normalizar_clave(row.get("Cliente", ""))
                             placa_val = normalizar_clave(row.get("Placas", ""))
@@ -1134,9 +1105,6 @@ if es_admin:
                             if df_t.empty or not cliente_val or pd.isna(fecha_raw_val):
                                 return 0.0
 
-                            # 3) Filtrar por empresa + cliente + vigencia.
-                            # Para empresa usamos contains porque es más tolerante a
-                            # variantes como GRUPOAYC / GRUPOAYCLOGISTICA.
                             filtro_base = (
                                 (df_t["empresa_norm"].str.contains(empresa_token, na=False))
                                 & (df_t["cliente_norm"] == cliente_val)
@@ -1149,7 +1117,6 @@ if es_admin:
                             if df_candidatas.empty:
                                 return 0.0
 
-                            # 4) PRIORIDAD 1: tarifa específica por placa.
                             if placa_val:
                                 match_placa = df_candidatas[
                                     df_candidatas["placa_norm"] == placa_val
@@ -1159,8 +1126,6 @@ if es_admin:
                                 if monto_placa is not None:
                                     return monto_placa
 
-                            # 5) PRIORIDAD 2: tarifa general por tipo de unidad.
-                            # Solo toma filas sin placa específica.
                             match_tipo = df_candidatas[
                                 (df_candidatas["tipo_norm"] == tipo_val)
                                 & (df_candidatas["placa_norm"] == "")
@@ -1172,9 +1137,6 @@ if es_admin:
 
                             return 0.0
 
-                        # ==================================================
-                        # 6. CÁLCULO DE MONTOS E IMPUESTOS
-                        # ==================================================
                         df_periodo["Monto_por_Unidad"] = df_periodo.apply(
                             determinar_monto,
                             axis=1,
@@ -1205,9 +1167,6 @@ if es_admin:
                             - df_periodo["Retencion_ISR"]
                         )
 
-                        # Diagnóstico no invasivo: si alguna ruta quedó en $0,
-                        # mostramos las combinaciones sin tarifa para detectar
-                        # rápidamente un dato faltante en Supabase.
                         filas_sin_tarifa = df_periodo[
                             (df_periodo["Monto_por_Unidad"] == 0)
                             & (~df_periodo["Es_Ambulancia"].apply(es_verdadero))
@@ -1232,16 +1191,11 @@ if es_admin:
                                     use_container_width=True,
                                 )
 
-                        # Eliminamos solamente columnas técnicas creadas por el cálculo.
-                        # Se conserva Hora_Arribo / fecha_filtro originales para visualización.
                         df_periodo = df_periodo.drop(
                             columns=["fecha_servicio_calculo", "fecha_raw"],
                             errors="ignore",
                         )
 
-                        # ==================================================
-                        # 7. TÍTULO DEL PERIODO
-                        # ==================================================
                         dia_ini = fecha_ini.strftime("%d")
                         dia_fin = fecha_fin.strftime("%d")
                         meses = [
@@ -1267,9 +1221,6 @@ if es_admin:
 
                         st.divider()
 
-                        # ==================================================
-                        # 8. SECCIÓN AMAZON
-                        # ==================================================
                         st.subheader(f"{titulo_periodo} | Amazon")
                         df_amazon = df_periodo[
                             df_periodo["Cliente"]
@@ -1304,9 +1255,6 @@ if es_admin:
 
                         st.divider()
 
-                        # ==================================================
-                        # 9. SECCIÓN MERCADO LIBRE
-                        # ==================================================
                         st.subheader(f"{titulo_periodo} | Mercado Libre")
                         df_ml = df_periodo[
                             df_periodo["Cliente"]
@@ -1341,9 +1289,6 @@ if es_admin:
 
                         st.divider()
 
-                        # ==================================================
-                        # 10. GRAN TOTAL Y RESUMEN DE SERVICIOS
-                        # ==================================================
                         st.subheader(
                             f"Gran Total del Periodo - {nombre_empresa_corte}"
                         )
@@ -1398,9 +1343,6 @@ if es_admin:
                                 """
                             )
 
-                        # ==================================================
-                        # 11. MATRIZ DE SERVICIOS POR DÍA
-                        # ==================================================
                         st.write("---")
                         st.subheader("📅 Distribución Estructurada de Servicios por Día")
 
@@ -1470,9 +1412,6 @@ if es_admin:
 
                         st.dataframe(matriz_pivot, use_container_width=True)
 
-                        # ==================================================
-                        # 12. MÓDULO DE EXPORTACIÓN
-                        # ==================================================
                         st.write("---")
                         st.subheader("📥 Exportar Reportes")
                         col_btn1, col_btn2 = st.columns(2)
@@ -1525,9 +1464,6 @@ if es_admin:
                             pdf.set_auto_page_break(auto=True, margin=15)
                             ANCHO_UTIL = 277
 
-                            # ----------------------------------------------
-                            # PORTADA / RESUMEN
-                            # ----------------------------------------------
                             pdf.add_page()
                             pdf.set_font("Arial", "B", 16)
                             pdf.cell(
@@ -1959,9 +1895,6 @@ if es_admin:
                                 )
                                 pdf.ln(15)
 
-                            # ----------------------------------------------
-                            # AMAZON
-                            # ----------------------------------------------
                             titulo_amazon = f"{titulo_periodo} | Amazon"
                             pintar_tabla_detalle(df_amazon, titulo_amazon)
                             pintar_tabla_salarios(
@@ -1973,9 +1906,6 @@ if es_admin:
                                 f"Resumen de Unidades | Amazon | Semana {semana_corte}",
                             )
 
-                            # ----------------------------------------------
-                            # MERCADO LIBRE
-                            # ----------------------------------------------
                             titulo_ml = f"{titulo_periodo} | Mercado Libre"
                             pintar_tabla_detalle(df_ml, titulo_ml)
                             pintar_tabla_salarios(
