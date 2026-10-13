@@ -198,11 +198,17 @@ with tab2:
         tipo = st.selectbox("Tipo de Unidad", ["Sedan", "Small", "Large"])
         mod = st.number_input("Modelo", 1990, 2030, 2026)
         
-        # Nuevos campos de carga
+        # Nuevos campos de carga existentes
         f_circ = st.file_uploader("Tarjeta Circulación")
         f_seg = st.file_uploader("Seguro")
         f_vin = st.file_uploader("Fotografía VIN")
         f_plac = st.file_uploader("Fotografía Placas")
+        
+        # Nuevos campos solicitados para las fotografías de la unidad
+        f_frente = st.file_uploader("Fotografía de Frente")
+        f_trasera = st.file_uploader("Fotografía Trasera")
+        f_lat_izq = st.file_uploader("Fotografía Lateral Izquierda")
+        f_lat_der = st.file_uploader("Fotografía Lateral Derecha")
         
         enviar_u = st.form_submit_button("Registrar Unidad")
         if enviar_u:
@@ -219,14 +225,17 @@ with tab2:
                     "url_tarjeta_circulacion": procesar_archivo(f_circ, "unidades/tarjetas", p),
                     "url_poliza_seguro": procesar_archivo(f_seg, "unidades/polizas", p),
                     "url_vin": procesar_archivo(f_vin, "unidades/vin", p),
-                    "url_placa": procesar_archivo(f_plac, "unidades/placas", p)
+                    "url_placa": procesar_archivo(f_plac, "unidades/placas", p),
+                    "url_foto_unidad_frente": procesar_archivo(f_frente, "unidades/frente", p),
+                    "url_foto_unidad_trasera": procesar_archivo(f_trasera, "unidades/trasera", p),
+                    "url_foto_unidad_lateral_izq": procesar_archivo(f_lat_izq, "unidades/lateral_izq", p),
+                    "url_foto_unidad_lateral_der": procesar_archivo(f_lat_der, "unidades/lateral_der", p)
                 }
                 try:
                     supabase.table("unidades").insert(datos_u).execute()
                     st.success(f"Unidad registrada exitosamente para la estación {estacion_seleccionada}")
                 except Exception as e:
                     st.error(f"Error al registrar la unidad: {e}")
-
 # ==========================================
 # PESTAÑA 3: REGISTRO DE OPERACIÓN
 # ==========================================
