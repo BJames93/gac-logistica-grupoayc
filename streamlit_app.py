@@ -508,113 +508,191 @@ with tab4:
 # NUEVA PESTAÑA 5: ACTUALIZACION DE EXPEDIENTES
 # ===============================================
 with tab5:
-    st.header("🔄 Actualización de Unidades")
-    st.info("Utiliza esta sección para buscar y actualizar la información o los archivos de las unidades registradas mediante su placa vehicular.")
+    st.header("🔄 Actualización de Expedientes y Unidades")
+    st.info("Utiliza esta sección para actualizar expedientes de conductores o la información y documentos de las unidades registradas.")
     
-    placa_busqueda = st.text_input("Ingresa la placa de la unidad para actualizar:")
+    tipo_actualizacion = st.radio(
+        "Selecciona qué deseas actualizar:", 
+        ["Conductores (por RFC)", "Unidades (por Placa)"],
+        horizontal=True
+    )
     
-    if placa_busqueda:
-        # ============================== BÚSQUEDA Y VALIDACIÓN DE UNIDAD ==============================
-        res_u = supabase.table("unidades").select("*").eq("placas", placa_busqueda.upper()).execute()
+    st.write("---")
+    
+    if tipo_actualizacion == "Conductores (por RFC)":
+        rfc_busqueda = st.text_input("Ingresa el RFC del conductor para actualizar:")
         
-        if res_u.data:
-            reg_u = res_u.data[0]
-            id_unidad_db = reg_u.get("id_unidad")
+        if rfc_busqueda:
+            res = supabase.table("alta_conductor").select("*").eq("rfc", rfc_busqueda.upper()).execute()
             
-            st.write(f"Unidad encontrada - Placas: **{reg_u.get('placas')}** (Estación: **{reg_u.get('estacion_codigo', 'N/A')}**)")
-            st.write(f"Marca: **{reg_u.get('marca', 'No registrado')}** | Submarca: **{reg_u.get('submarca', 'No registrado')}** | Modelo: **{reg_u.get('modelo', 'No registrado')}** | Tipo: **{reg_u.get('tipo_unidad', 'No registrado')}**")
-            
-            st.write("---")
-            st.write("Estado de documentos y fotografías actuales:")
-            
-            docs_unidades_map = {
-                "Tarjeta Circulación": "url_tarjeta_circulacion",
-                "Seguro": "url_poliza_seguro",
-                "Fotografía VIN": "url_vin",
-                "Fotografía Placas": "url_placa",
-                "Fotografía de Frente": "url_foto_unidad_frente",
-                "Fotografía Trasera": "url_foto_unidad_trasera",
-                "Fotografía Lateral Izquierda": "url_foto_unidad_lateral_izq",
-                "Fotografía Lateral Derecha": "url_foto_unidad_lateral_der"
-            }
-            
-            cols = st.columns(2)
-            for i, (nombre_doc, key_doc) in enumerate(docs_unidades_map.items()):
-                status = "✅" if reg_u.get(key_doc) else "❌"
-                cols[i % 2].write(f"{status} {nombre_doc}")
+            if res.data:
+                reg = res.data[0]
+                st.write(f"Conductor encontrado: **{reg['nombre_driver']}** (Estación: **{reg.get('estacion_codigo', 'N/A')}**)")
+                st.write(f"Celular actual: **{reg.get('celular', 'No registrado')}**")
+                banco_actual = reg.get('nombre_banco') or 'No registrado'
+                clabe_actual = reg.get('clabe_interbancaria') or 'No registrado'
+                st.write(f"Banco actual: **{banco_actual}** | CLABE actual: **{clabe_actual}**")
                 
-            st.write("---")
-            
-            opcion_unidad = st.selectbox(
-                "¿Qué deseas actualizar de esta unidad?", 
-                [""] + ["Datos Generales (Marca, Submarca, Modelo, Tipo)"] + list(docs_unidades_map.keys())
-            )
-            
-            if opcion_unidad == "Datos Generales (Marca, Submarca, Modelo, Tipo)":
-                nuevo_p = st.text_input("Placas", value=reg_u.get('placas', ''))
-                nueva_marca = st.text_input("Marca", value=reg_u.get('marca', ''))
-                nueva_submarca = st.text_input("Submarca", value=reg_u.get('submarca', ''))
+                st.write("---")
+                st.write("Estado de documentos actuales:")
+                docs_map = {
+                    "Acta de Nacimiento": "url_acta_nacimiento", "CURP": "url_curp",
+                    "Seguro Social (NSS)": "url_seguro_social", "INE": "url_ine",
+                    "Constancia Fiscal": "url_constancia_fiscal", "Licencia de Conducir": "url_licencia",
+                    "Comprobante Domicilio": "url_comprobante_domicilio", "Carátula Bancaria": "url_caratula_bancaria",
+                    "Examen Toxicológico": "url_toxicologico", "Comprobante de Estudios": "url_comprobante_estudios",
+                    "Carta de Referencia": "url_carta_referencia"
+                }
+                cols = st.columns(3)
+                for i, (nombre, key) in enumerate(docs_map.items()):
+                    status = "✅" if reg.get(key) else "❌"
+                    cols[i % 3].write(f"{status} {nombre}")
+                st.write("---")
                 
-                tipos_disponibles = ["Sedan", "Small", "Large"]
-                tipo_actual = reg_u.get('tipo_unidad')
-                idx_tipo = tipos_disponibles.index(tipo_actual) if tipo_actual in tipos_disponibles else 0
-                nuevo_tipo = st.selectbox("Tipo de Unidad", tipos_disponibles, index=idx_tipo)
+                opcion = st.selectbox("¿Qué deseas actualizar?", [""] + list(docs_map.keys()) + ["Actualizar Número de Celular", "Actualizar Datos Bancarios"])
                 
-                modelo_actual = reg_u.get('modelo')
-                nuevo_modelo = st.number_input("Modelo", 1990, 2030, int(modelo_actual) if modelo_actual else 2026)
+                if opcion == "Actualizar Número de Celular":
+                    nuevo_celular = st.text_input("Nuevo número de celular:", value=reg.get('celular') or "")
+                    if st.button("Guardar nuevo celular"):
+                        supabase.table("alta_conductor").update({"celular": nuevo_celular}).eq("rfc", rfc_busqueda.upper()).execute()
+                        st.success("¡Celular actualizado correctamente! Recarga la página para ver el cambio.")
                 
-                if st.button("Guardar cambios generales"):
-                    if not nuevo_p:
-                        st.error("Las placas son obligatorias.")
-                    else:
-                        try:
-                            supabase.table("unidades").update({
-                                "placas": nuevo_p.upper(),
-                                "marca": nueva_marca,
-                                "submarca": nueva_submarca,
-                                "tipo_unidad": nuevo_tipo,
-                                "modelo": int(nuevo_modelo)
-                            }).eq("id_unidad", id_unidad_db).execute()
-                            st.success("¡Datos generales de la unidad actualizados correctamente! Recarga la página para ver el cambio.")
-                        except Exception as e:
-                            st.error(f"Error al actualizar la unidad: {e}")
-                            
-            elif opcion_unidad in docs_unidades_map:
-                archivo_nuevo_u = st.file_uploader(f"Cargar nuevo archivo de {opcion_unidad}")
-                if st.button("Guardar actualización de archivo"):
-                    if archivo_nuevo_u:
-                        columna_db_u = docs_unidades_map[opcion_unidad]
-                        
-                        # Definir la ruta de almacenamiento según el tipo de archivo/foto
-                        if opcion_unidad == "Tarjeta Circulación":
-                            ruta_storage_u = "unidades/tarjetas"
-                        elif opcion_unidad == "Seguro":
-                            ruta_storage_u = "unidades/polizas"
-                        elif opcion_unidad == "Fotografía VIN":
-                            ruta_storage_u = "unidades/vin"
-                        elif opcion_unidad == "Fotografía Placas":
-                            ruta_storage_u = "unidades/placas"
-                        elif opcion_unidad == "Fotografía de Frente":
-                            ruta_storage_u = "unidades/frente"
-                        elif opcion_unidad == "Fotografía Trasera":
-                            ruta_storage_u = "unidades/trasera"
-                        elif opcion_unidad == "Fotografía Lateral Izquierda":
-                            ruta_storage_u = "unidades/lateral_izq"
+                elif opcion == "Actualizar Datos Bancarios":
+                    nuevo_banco = st.text_input("Nuevo Nombre del Banco:", value=reg.get('nombre_banco') or "")
+                    nueva_clabe = st.text_input("Nueva CLABE Interbancaria:", max_chars=18, value=reg.get('clabe_interbancaria') or "")
+                    
+                    if st.button("Guardar datos bancarios"):
+                        if nueva_clabe and len(nueva_clabe) < 18:
+                            st.error(f"La CLABE está incompleta. Ingresaste {len(nueva_clabe)} dígitos de los 18 requeridos.")
+                        elif nueva_clabe and not nueva_clabe.isdigit():
+                            st.error("La CLABE solo debe contener números.")
                         else:
-                            ruta_storage_u = "unidades/lateral_der"
+                            supabase.table("alta_conductor").update({
+                                "nombre_banco": nuevo_banco,
+                                "clabe_interbancaria": nueva_clabe
+                            }).eq("rfc", rfc_busqueda.upper()).execute()
+                            st.success("¡Datos bancarios actualizados correctamente! Recarga la página para ver el cambio.")
+                
+                elif opcion in docs_map:
+                    archivo_nuevo = st.file_uploader(f"Cargar nuevo archivo de {opcion}")
+                    if st.button("Guardar actualización"):
+                        if archivo_nuevo:
+                            columna_db = docs_map[opcion]
+                            nombre_carpeta = opcion.lower().replace(" ", "_")
+                            ruta_storage = f"conductores/{nombre_carpeta}s"
                             
-                        placa_ref = reg_u.get('placas')
-                        nueva_url_u = procesar_archivo(archivo_nuevo_u, ruta_storage_u, placa_ref)
-                        
-                        try:
-                            supabase.table("unidades").update({columna_db_u: nueva_url_u}).eq("id_unidad", id_unidad_db).execute()
-                            st.success(f"¡{opcion_unidad} actualizado correctamente! Recarga la página para ver el cambio.")
-                        except Exception as e:
-                            st.error(f"Error al actualizar el archivo: {e}")
-                    else:
-                        st.warning("Por favor selecciona un archivo.")
-        else:
-            st.error("No se encontró ninguna unidad registrada con esa placa.")
+                            nueva_url = procesar_archivo(archivo_nuevo, ruta_storage, rfc_busqueda.upper())
+                            
+                            supabase.table("alta_conductor").update({columna_db: nueva_url}).eq("rfc", rfc_busqueda.upper()).execute()
+                            st.success(f"¡{opcion} actualizado correctamente! Recarga la página para ver el cambio.")
+                        else:
+                            st.warning("Por favor selecciona un archivo.")
+            else:
+                st.error("No se encontró ningún conductor con ese RFC.")
+                
+    else:
+        placa_busqueda = st.text_input("Ingresa la placa de la unidad para actualizar:")
+        
+        if placa_busqueda:
+            res_u = supabase.table("unidades").select("*").eq("placas", placa_busqueda.upper()).execute()
+            
+            if res_u.data:
+                reg_u = res_u.data[0]
+                id_unidad_db = reg_u.get("id_unidad")
+                
+                st.write(f"Unidad encontrada - Placas: **{reg_u.get('placas')}** (Estación: **{reg_u.get('estacion_codigo', 'N/A')}**)")
+                st.write(f"Marca: **{reg_u.get('marca', 'No registrado')}** | Submarca: **{reg_u.get('submarca', 'No registrado')}** | Modelo: **{reg_u.get('modelo', 'No registrado')}** | Tipo: **{reg_u.get('tipo_unidad', 'No registrado')}**")
+                
+                st.write("---")
+                st.write("Estado de documentos y fotografías actuales:")
+                
+                docs_unidades_map = {
+                    "Tarjeta Circulación": "url_tarjeta_circulacion",
+                    "Seguro": "url_poliza_seguro",
+                    "Fotografía VIN": "url_vin",
+                    "Fotografía Placas": "url_placa",
+                    "Fotografía de Frente": "url_foto_unidad_frente",
+                    "Fotografía Trasera": "url_foto_unidad_trasera",
+                    "Fotografía Lateral Izquierda": "url_foto_unidad_lateral_izq",
+                    "Fotografía Lateral Derecha": "url_foto_unidad_lateral_der"
+                }
+                
+                cols = st.columns(2)
+                for i, (nombre_doc, key_doc) in enumerate(docs_unidades_map.items()):
+                    status = "✅" if reg_u.get(key_doc) else "❌"
+                    cols[i % 2].write(f"{status} {nombre_doc}")
+                    
+                st.write("---")
+                
+                opcion_unidad = st.selectbox(
+                    "¿Qué deseas actualizar de esta unidad?", 
+                    [""] + ["Datos Generales (Marca, Submarca, Modelo, Tipo)"] + list(docs_unidades_map.keys())
+                )
+                
+                if opcion_unidad == "Datos Generales (Marca, Submarca, Modelo, Tipo)":
+                    nuevo_p = st.text_input("Placas", value=reg_u.get('placas', ''))
+                    nueva_marca = st.text_input("Marca", value=reg_u.get('marca', ''))
+                    nueva_submarca = st.text_input("Submarca", value=reg_u.get('submarca', ''))
+                    
+                    tipos_disponibles = ["Sedan", "Small", "Large"]
+                    tipo_actual = reg_u.get('tipo_unidad')
+                    idx_tipo = tipos_disponibles.index(tipo_actual) if tipo_actual in tipos_disponibles else 0
+                    nuevo_tipo = st.selectbox("Tipo de Unidad", tipos_disponibles, index=idx_tipo)
+                    
+                    modelo_actual = reg_u.get('modelo')
+                    nuevo_modelo = st.number_input("Modelo", 1990, 2030, int(modelo_actual) if modelo_actual else 2026)
+                    
+                    if st.button("Guardar cambios generales"):
+                        if not nuevo_p:
+                            st.error("Las placas son obligatorias.")
+                        else:
+                            try:
+                                supabase.table("unidades").update({
+                                    "placas": nuevo_p.upper(),
+                                    "marca": nueva_marca,
+                                    "submarca": nueva_submarca,
+                                    "tipo_unidad": nuevo_tipo,
+                                    "modelo": int(nuevo_modelo)
+                                }).eq("id_unidad", id_unidad_db).execute()
+                                st.success("¡Datos generales de la unidad actualizados correctamente! Recarga la página para ver el cambio.")
+                            except Exception as e:
+                                st.error(f"Error al actualizar la unidad: {e}")
+                                
+                elif opcion_unidad in docs_unidades_map:
+                    archivo_nuevo_u = st.file_uploader(f"Cargar nuevo archivo de {opcion_unidad}")
+                    if st.button("Guardar actualización de archivo"):
+                        if archivo_nuevo_u:
+                            columna_db_u = docs_unidades_map[opcion_unidad]
+                            
+                            if opcion_unidad == "Tarjeta Circulación":
+                                ruta_storage_u = "unidades/tarjetas"
+                            elif opcion_unidad == "Seguro":
+                                ruta_storage_u = "unidades/polizas"
+                            elif opcion_unidad == "Fotografía VIN":
+                                ruta_storage_u = "unidades/vin"
+                            elif opcion_unidad == "Fotografía Placas":
+                                ruta_storage_u = "unidades/placas"
+                            elif opcion_unidad == "Fotografía de Frente":
+                                ruta_storage_u = "unidades/frente"
+                            elif opcion_unidad == "Fotografía Trasera":
+                                ruta_storage_u = "unidades/trasera"
+                            elif opcion_unidad == "Fotografía Lateral Izquierda":
+                                ruta_storage_u = "unidades/lateral_izq"
+                            else:
+                                ruta_storage_u = "unidades/lateral_der"
+                                
+                            placa_ref = reg_u.get('placas')
+                            nueva_url_u = procesar_archivo(archivo_nuevo_u, ruta_storage_u, placa_ref)
+                            
+                            try:
+                                supabase.table("unidades").update({columna_db_u: nueva_url_u}).eq("id_unidad", id_unidad_db).execute()
+                                st.success(f"¡{opcion_unidad} actualizado correctamente! Recarga la página para ver el cambio.")
+                            except Exception as e:
+                                st.error(f"Error al actualizar el archivo: {e}")
+                        else:
+                            st.warning("Por favor selecciona un archivo.")
+            else:
+                st.error("No se encontró ninguna unidad registrada con esa placa.")
 # ===============================================
 # NUEVA PESTAÑA 6: VERIFICACION DE CAPTURA
 # ===============================================
