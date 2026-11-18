@@ -195,7 +195,7 @@ with tab2:
         m = st.text_input("Marca")
         sm = st.text_input("Submarca")
         
-        tipo = st.selectbox("Tipo de Unidad", ["Sedan", "Small", "Large"])
+        tipo = st.selectbox("Tipo de Unidad", ["Sedan", "Small", "Large","Extra Large"])
         mod = st.number_input("Modelo", 1990, 2030, 2026)
         
         # Nuevos campos de carga existentes
